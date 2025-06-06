@@ -1,0 +1,34 @@
+fastapi
+uvicorn[standard] # For local development server
+pydantic
+
+# Langchain stack
+langchain
+langchain-core
+langgraph # Added: For StateGraph
+langchain_community
+langchain-google-genai # Added: For init_chat_model with "google_genai" provider (Gemini)
+# langchain-openai # Removed: Assuming primary LLM is Google GenAI as per agent code
+# openai # Removed: Assuming primary LLM is Google GenAI
+
+# Vector Store and Embeddings
+sentence-transformers # For HuggingFaceEmbeddings
+faiss-cpu # For FAISS vector store
+
+# Web requests and utilities
+requests # For Tavily API calls and WebBaseLoader sub-dependency
+beautifulsoup4 # Often a good companion for WebBaseLoader for parsing HTML
+
+# Environment and Async/Retry
+python-dotenv # For .env file loading
+tenacity # For @retry decorator
+cachetools # For TTLCache
+
+# Google specific (if not covered by langchain-google-genai for all needs)
+google-generativeai # Explicitly listed, might be used by init_chat_model or directly
+
+# Notes:
+# - Ensure API keys (TAVILY_API_KEY, GOOGLE_API_KEY) are set in the Vercel environment.
+# - Versions can be pinned for more stable deployments (e.g., fastapi==0.100.0).
+# - sqlite3 is part of Python's standard library, no need to list it.
+# - csv, json, shutil, re, datetime, typing, uuid, os, traceback, argparse are standard libraries.

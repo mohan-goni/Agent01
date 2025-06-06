@@ -2,18 +2,20 @@
 
 ## Overview
 
-The Market Intelligence Platform is an AI-powered dashboard designed to provide users with aggregated news, market insights, competitor analysis, and customer sentiment analysis. It leverages a RAG (Retrieval Augmented Generation) agent for interactive querying and integrates various data sources to offer a comprehensive view of the market landscape.
+The Market Intelligence Platform is an AI-powered dashboard designed to provide users with aggregated news, market insights, competitor analysis, and customer sentiment analysis. It leverages a RAG (Retrieval Augmented Generation) agent for interactive querying and integrates various data sources to offer a comprehensive view of the market landscape. The platform consists of a Next.js frontend and a Python FastAPI backend for agent processing.
 
 ## Tech Stack
 
-*   **Framework:** Next.js (App Router)
-*   **Language:** TypeScript
-*   **ORM:** Drizzle ORM
-*   **Database:** PostgreSQL
+*   **Frontend Framework:** Next.js (App Router)
+*   **Backend API (Agent):** Python with FastAPI
+*   **Language:** TypeScript (Frontend), Python (Backend)
+*   **ORM:** Drizzle ORM (for Next.js backend interactions with PostgreSQL)
+*   **Database:** PostgreSQL (for main application data), SQLite (for Python agent's internal state/cache)
 *   **Authentication:** Better Auth (with Google OAuth and Email/Password)
 *   **UI Components:** ShadCN UI
 *   **Styling:** TailwindCSS
-*   **Deployment:** Vercel (initially, as per v0.dev template)
+*   **Python Agent Core:** Langchain, Langgraph, FAISS, Sentence Transformers
+*   **Deployment:** Vercel (for both Next.js and Python FastAPI service)
 
 ## Prerequisites
 
@@ -21,9 +23,12 @@ Before you begin, ensure you have the following installed:
 
 *   Node.js (v18 or later recommended)
 *   pnpm (Package manager - `npm install -g pnpm`)
+*   Python (v3.9 or later recommended)
 *   A running PostgreSQL instance (local or remote)
 
 ## Getting Started
+
+This project includes a Next.js frontend and a Python FastAPI backend service located in the `api_python/` directory.
 
 ### 1. Clone the Repository
 
@@ -32,121 +37,150 @@ git clone <your-repository-url>
 cd <repository-name>
 ```
 
-### 2. Install Dependencies
+### 2. Frontend (Next.js) Setup
 
-Install project dependencies using pnpm:
-
-```bash
-pnpm install
-```
-
-### 3. Set Up Environment Variables
-
-*   Copy the example environment file:
+*   **Install Dependencies:**
     ```bash
-    cp .env.example .env.local
+    pnpm install
     ```
-*   Open `.env.local` in a text editor and fill in the required values:
-    *   `DATABASE_URL`: Your PostgreSQL connection string.
-        *   Example: `postgresql://user:password@localhost:5432/market_intel_db?sslmode=disable` (for local development)
-    *   `GOOGLE_CLIENT_ID`: Your Google OAuth Client ID from Google Cloud Console.
-    *   `GOOGLE_CLIENT_SECRET`: Your Google OAuth Client Secret.
-    *   `GOOGLE_REDIRECT_URI`: Your Google OAuth redirect URI (e.g., `http://localhost:3000/api/auth/callback/google`).
-    *   `AUTH_SECRET`: A randomly generated string for session encryption. You can generate one using:
+*   **Set Up Frontend Environment Variables:**
+    *   Copy the example environment file:
         ```bash
-        openssl rand -hex 32
+        cp .env.example .env.local
         ```
-    *   `AUTH_URL`: The base URL of your application (e.g., `http://localhost:3000`).
+    *   Open `.env.local` and fill in the required values as described in `.env.example`. This includes `DATABASE_URL` for PostgreSQL, Google OAuth credentials, `AUTH_SECRET`, `AUTH_URL`, and optionally `PYTHON_AGENT_API_BASE_URL` for specific local development setups.
 
-### 4. Database Setup & Migrations
-
-*   Ensure your PostgreSQL server is running and accessible via the `DATABASE_URL` you configured.
-*   Create the database if it doesn't exist (e.g., `market_intel_db`).
-*   Apply database migrations using Drizzle Kit to set up the schema:
-    ```bash
-    pnpm drizzle-kit migrate
-    ```
-*   **Making Schema Changes:** If you modify the database schema in `db/schema.ts`:
-    1.  Generate a new migration file:
-        ```bash
-        pnpm drizzle-kit generate
-        ```
-    2.  Then, apply the new migration:
+*   **Database Setup & Migrations (PostgreSQL):**
+    *   Ensure your PostgreSQL server is running and accessible via the `DATABASE_URL`.
+    *   Create the database if it doesn't exist (e.g., `market_intel_db`).
+    *   Apply Drizzle migrations for the Next.js application's database:
         ```bash
         pnpm drizzle-kit migrate
         ```
+    *   If you modify `db/schema.ts`, generate new migrations: `pnpm drizzle-kit generate` then `pnpm drizzle-kit migrate`.
 
-### 5. (Optional) Seeding Initial Data
+### 3. Backend (Python FastAPI Agent) Setup (`api_python/`)
 
-The application includes a "Load Sample Data" button on the dashboard. This uses a Server Action to populate the database with sample articles and insights. This is the recommended way to get initial data for exploration.
+*   **Navigate to Python API Directory:**
+    ```bash
+    cd api_python
+    ```
+*   **Create a Python Virtual Environment (Recommended):**
+    ```bash
+    python -m venv .venv
+    source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+    ```
+*   **Install Python Dependencies:**
+    ```bash
+    pip install -r requirements.txt
+    ```
+*   **Set Up Backend Environment Variables:**
+    *   The Python agent service uses its own `.env` file within the `api_python/` directory. Copy the example:
+        ```bash
+        cp .env.example .env
+        ```
+        *(This refers to `api_python/.env.example`)*
+    *   Edit `api_python/.env` and provide API keys like `TAVILY_API_KEY`, `GOOGLE_API_KEY`, as detailed in `api_python/.env.example`.
+*   The Python agent initializes its own SQLite database (e.g., `market_intelligence_agent.db`) and stores reports. On Vercel, these are written to the `/tmp` directory (see "Deployment Considerations").
+
+### 4. (Optional) Seeding Initial Data
+
+The Next.js application includes a "Load Sample Data" button on the dashboard. This uses a Server Action to populate the PostgreSQL database with sample articles.
 
 ## Running the Application
 
-### Development Mode
+You have two main ways to run the full application (Next.js frontend + Python FastAPI backend) locally:
 
-To run the application in development mode (with hot-reloading):
+*   **Recommended for Vercel-like experience: `vercel dev`**
+    *   Ensure Vercel CLI is installed (`npm install -g vercel`).
+    *   Run from the project root:
+        ```bash
+        vercel dev
+        ```
+    *   This command starts both services according to `vercel.json` and uses environment variables set up in your Vercel project settings (link your local project to Vercel: `vercel link`) or local `.env` files (Vercel CLI might pick up `.env.local` for Next.js and `api_python/.env` for Python if `python-dotenv` is used early in Python scripts).
 
-```bash
-pnpm dev
-```
+*   **Running Services Separately:**
+    1.  **Start the Python FastAPI Agent Service:**
+        ```bash
+        cd api_python
+        # Ensure virtual environment is active: source .venv/bin/activate
+        python main.py
+        # Or: uvicorn main:app --reload --port 8008
+        ```
+        This typically starts the Python API on `http://localhost:8008`.
+    2.  **Start the Next.js Frontend Service (in another terminal):**
+        From the project root:
+        ```bash
+        pnpm dev
+        ```
+        This starts the Next.js app on `http://localhost:3000`.
+        *Ensure your frontend's `PYTHON_AGENT_API_BASE_URL` in `.env.local` is set to `http://localhost:8008` if running services separately this way.*
+
 Open [http://localhost:3000](http://localhost:3000) in your browser.
 
-### Production Mode
+### Production Mode (Next.js only)
 
-To build the application for production:
-
+To build the Next.js application for production:
 ```bash
 pnpm build
 ```
-
-To run the production build:
-
+To run the Next.js production build:
 ```bash
 pnpm start
 ```
+*(The Python FastAPI service is deployed as serverless functions on Vercel alongside Next.js, as per `vercel.json`.)*
+
+## Python Agent API Service (`api_python/`)
+
+*   **Overview:** This directory contains a FastAPI application that serves the core Python-based RAG agent logic. It handles chat interactions (`/chat` endpoint) and full market analysis report generation (`/run-analysis` endpoint).
+*   **Key Files:**
+    *   `main.py`: FastAPI app definition.
+    *   `agent_logic.py`: The core RAG agent implementation.
+    *   `requirements.txt`: Python dependencies.
+    *   `.env.example`: Example environment variables needed by the agent. Copy to `.env` for local setup.
+    *   `market_intelligence_agent.db`: SQLite DB for agent state, chat history (in `/tmp` on Vercel).
+    *   `reports1/`: Default output directory for generated reports (in `/tmp/reports1` on Vercel).
+*   **Interaction with Next.js:** Next.js Server Actions call these FastAPI endpoints. `vercel.json` handles routing in deployment. `PYTHON_AGENT_API_BASE_URL` in Next.js `.env.local` can target this service directly during separate local development.
 
 ## Key Features Implemented
 
-*   **Authentication:** Secure user sign-up, sign-in (Email/Password & Google OAuth), and forgot password flows using `better-auth`. Protected routes for authenticated users.
-*   **Dashboard:** Displays aggregated news, market insights (placeholder), and KPI cards. Features data refresh and sample data seeding capabilities using Server Actions.
-*   **Data Integration:**
-    *   **API Keys Management:** Securely add, view (masked), delete, and simulate verification of API keys for external services.
-    *   **Data Sources Management:** Add, edit, delete, enable/disable, and simulate testing of various data sources (e.g., API, Web Scraper).
-*   **RAG Agent Chat:** An interactive chat interface (currently with placeholder responses) for users to query the platform's knowledge base.
-*   **Dark Theme by Default:** The application uses a dark theme consistently, with a persistently dark sidebar.
-*   **Responsive Design:** Core layout and components are designed to be responsive.
+*   **Authentication:** Secure user sign-up, sign-in (Email/Password & Google OAuth), and forgot password flows. Protected routes.
+*   **Dashboard:** Displays aggregated data, KPI cards, and placeholders for charts. Features data refresh and sample data seeding via Server Actions.
+*   **Data Integration:** Management of API Keys and Data Sources with CRUD operations.
+*   **RAG Agent & Full Analysis:**
+    *   **Chat Interface:** Interactive chat with the RAG agent (`/agent-chat` page) via the `/api/python_agent/chat` endpoint.
+    *   **Full Analysis Workflow:** A dedicated page (`/run-analysis`) to trigger the comprehensive market analysis and report generation workflow via the `/api/python_agent/run-analysis` endpoint.
+*   **Artifact Access and Downloads:**
+    *   Results from the "Run Analysis" feature (RAG responses, file information) are displayed on the `/run-analysis` page.
+    *   Generated charts are displayed as images.
+    *   Download links are provided for reports (Markdown), data files (JSON, CSV), and logs.
+    *   This is facilitated by a secure Next.js API route (`/api/download-artifact?filePath=<path>`) that serves files generated by the Python agent. The `filePath` is relative to the agent's output directory (e.g., `/tmp/reports1/...` on Vercel).
+*   **Dark Theme by Default:** Consistent dark theme throughout the application.
+*   **Responsive Design:** Core layout and components are designed for responsiveness.
 
 ## Folder Structure
 
-A brief overview of the main directories:
-
-*   `app/`: Contains Next.js App Router pages, layouts, and route handlers.
-    *   `app/api/`: API routes (primarily for authentication callbacks with `better-auth`).
-    *   `app/(authenticated)/`: Route group for pages requiring authentication, using a shared layout with a sidebar.
-    *   `app/auth/`: Pages related to authentication (login, signup, forgot password).
-*   `components/`: Shared UI components, particularly ShadCN UI elements.
-    *   `components/ui/`: Auto-generated ShadCN UI components.
-    *   `components/auth/`: Authentication-specific form components.
-*   `db/`: Database related files.
-    *   `db/schema.ts`: Drizzle ORM schema definitions.
-    *   `db/migrations/`: Drizzle Kit migration files.
-*   `lib/`: Core library functions and utilities.
-    *   `lib/auth.ts`: Configuration for `better-auth`.
-    *   `lib/db.ts`: Drizzle ORM client setup and database query functions.
-    *   `lib/news-service.ts`, `lib/ai-service.ts`: Placeholder services.
-*   `public/`: Static assets.
-*   `scripts/`: Utility scripts (if any, e.g., for database operations).
+*   `app/`: Next.js App Router (frontend).
+    *   `app/api/`: Next.js API routes (auth callbacks, file downloads).
+    *   `app/(authenticated)/`: Protected routes using the main application layout.
+*   `api_python/`: Python FastAPI service (backend RAG agent logic).
+*   `components/`: Shared React UI components.
+*   `db/`: Drizzle ORM schema and migrations for PostgreSQL.
+*   `lib/`: Frontend TypeScript utilities, Next.js backend DB functions.
+*   `public/`: Static assets for Next.js.
 
 ## Linting and Formatting
 
-This project is set up with ESLint and Prettier (via Next.js defaults). To lint your code:
-
+This project is set up with ESLint and Prettier. To lint your code:
 ```bash
 pnpm lint
 ```
 
-Formatting is typically handled by editor integrations or can be run via `pnpm prettier --write .` (if Prettier is explicitly configured in `package.json` scripts).
+## Deployment Considerations
+
+*   **Vercel File System:** The Python agent service, when deployed on Vercel, uses the `/tmp` directory for its SQLite database, logs, and generated reports (e.g., in `/tmp/reports1/`). This directory is ephemeral (temporary).
+*   **Artifact Persistence:** Files written to `/tmp` are not guaranteed to persist long-term or across all serverless function invocations. For persistent storage of generated reports or critical agent data, future enhancements should consider integrating a cloud storage solution (e.g., Vercel Blob, AWS S3, Google Cloud Storage). The current download mechanism serves files directly from this temporary serverless storage.
+*   **Environment Variables:** Ensure all required environment variables for both Next.js (in Vercel project settings, general tab) and the Python service (in Vercel project settings, Python function tab, or general if prefixed) are correctly set. This includes database URLs, auth secrets, and API keys for services like Tavily and Google Gemini.
 
 ---
-
-This README provides a starting point. Feel free to expand it with more details about specific features, deployment instructions for other platforms, or contribution guidelines.
+This README provides a starting point. Feel free to expand it with more details.
