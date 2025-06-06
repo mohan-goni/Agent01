@@ -10,7 +10,7 @@ import {
   SidebarFooter,
   SidebarInset,
 } from "@/components/ui/sidebar";
-import { Home, BarChart2, TrendingUp, Users, Settings, Download, MessageSquare, UserCircle, Bell, LogOut } from "lucide-react"; // Added LogOut
+import { Home, BarChart2, TrendingUp, Users, Settings, Download, MessageSquare, UserCircle, Bell, LogOut, FileSearch } from "lucide-react"; // Added FileSearch
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 
@@ -74,6 +74,11 @@ export default async function AuthenticatedLayout({ // Made component async
             <SidebarMenuItem>
               <SidebarMenuButton asChild tooltip="Agent Chat">
                 <Link href="/agent-chat"><MessageSquare className="h-5 w-5" /> <span>Agent Chat</span></Link>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+            <SidebarMenuItem> {/* New Item for Run Analysis */}
+              <SidebarMenuButton asChild tooltip="Run Full Analysis">
+                <Link href="/run-analysis"><FileSearch className="h-5 w-5" /> <span>Run Analysis</span></Link>
               </SidebarMenuButton>
             </SidebarMenuItem>
             <SidebarMenuItem>

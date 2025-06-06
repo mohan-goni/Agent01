@@ -1,0 +1,41 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "api_python/main.py",
+      "use": "@vercel/python",
+      "config": {
+        "maxLambdaSize": "50mb",
+        "runtime": "python3.9"
+      }
+    },
+    {
+      "src": "package.json",
+      "use": "@vercel/next",
+      "config": {
+        "distDir": ".next"
+      }
+    }
+  ],
+  "routes": [
+    {
+      "src": "/api/python_agent/(.*)",
+      "dest": "api_python/main.py"
+    },
+    {
+      "src": "/(.*)",
+      "handle": "filesystem"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/$1"
+    }
+  ],
+  "env": {
+    "PYTHONPATH": "$PYTHONPATH:api_python"
+    // Ensures agent_logic can be imported if structured within api_python,
+    // though for simple cases Vercel often handles same-directory imports.
+    // This might not be strictly necessary if agent_logic.py is at the root of the lambda package.
+  },
+  "gitsubmodules": true // Example if Agent.py or its dependencies were a submodule
+}
