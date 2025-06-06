@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server"
-import { saveArticle, saveMarketInsight } from "@/lib/database"
+import { saveArticle } from "@/lib/db" // Updated import path from @/lib/database to @/lib/db
+// import { saveMarketInsight } from "@/lib/database" // saveMarketInsight is not yet in lib/db.ts
+
+// For now, we'll focus on articles as per the subtask.
+// If saveMarketInsight is needed and is part of lib/db.ts, ensure it's imported correctly.
+// Assuming saveMarketInsight is not immediately relevant for this subtask focusing on articles.
 
 const sampleArticles = [
   {
@@ -13,6 +18,9 @@ const sampleArticles = [
     author: "Sarah Johnson",
     publishedAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(), // 2 hours ago
     category: "markets",
+    sentimentScore: 0.75, // Added
+    aiSummary: "Global stock markets are rallying due to positive economic signals and investor optimism.", // Added
+    keywords: ["market recovery", "economic optimism", "stock gains"], // Added
   },
   {
     title: "Tech Sector Leads Innovation Wave with AI Breakthroughs",
@@ -25,6 +33,9 @@ const sampleArticles = [
     author: "Michael Chen",
     publishedAt: new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString(), // 4 hours ago
     category: "technology",
+    sentimentScore: 0.85, // Added
+    aiSummary: "Significant AI advancements by tech giants are fueling growth and investment in the technology sector.", // Added
+    keywords: ["AI", "tech innovation", "investment"], // Added
   },
   {
     title: "Energy Transition Accelerates with Record Renewable Investment",
@@ -37,6 +48,9 @@ const sampleArticles = [
     author: "Emma Rodriguez",
     publishedAt: new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString(), // 6 hours ago
     category: "energy",
+    sentimentScore: 0.60, // Added
+    aiSummary: "Investment in renewable energy is surging as sustainability becomes a global priority.", // Added
+    keywords: ["renewable energy", "sustainability", "investment"], // Added
   },
   {
     title: "Cryptocurrency Market Stabilizes After Recent Volatility",
@@ -49,6 +63,9 @@ const sampleArticles = [
     author: "David Kim",
     publishedAt: new Date(Date.now() - 8 * 60 * 60 * 1000).toISOString(), // 8 hours ago
     category: "cryptocurrency",
+    sentimentScore: 0.40, // Added
+    aiSummary: "The cryptocurrency market is stabilizing, with increasing institutional interest despite past volatility.", // Added
+    keywords: ["cryptocurrency", "market stabilization", "institutional adoption"], // Added
   },
   {
     title: "Supply Chain Resilience Becomes Key Business Priority",
@@ -61,6 +78,9 @@ const sampleArticles = [
     author: "Lisa Thompson",
     publishedAt: new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString(), // 12 hours ago
     category: "business",
+    sentimentScore: 0.50, // Added
+    aiSummary: "Businesses are focusing on strengthening supply chains to prevent future disruptions through diversification and technology.", // Added
+    keywords: ["supply chain", "resilience", "business strategy"], // Added
   },
 ]
 
@@ -69,13 +89,29 @@ export async function POST() {
     // Seed articles
     const savedArticles = []
     for (const article of sampleArticles) {
-      const saved = await saveArticle(article)
+      // Ensure all fields expected by saveArticle are present
+      const articleData = {
+        title: article.title,
+        description: article.description,
+        content: article.content,
+        url: article.url,
+        source: article.source,
+        author: article.author,
+        publishedAt: article.publishedAt,
+        category: article.category,
+        sentimentScore: article.sentimentScore,
+        aiSummary: article.aiSummary,
+        keywords: article.keywords,
+      };
+      const saved = await saveArticle(articleData)
       if (saved) {
         savedArticles.push(saved)
       }
     }
 
-    // Seed market insights
+    // Seed market insights - Commenting out as saveMarketInsight is not in lib/db.ts yet
+    // and this subtask focuses on articles.
+    /*
     const sampleInsight = `
 Market Analysis Summary - ${new Date().toLocaleDateString()}
 
@@ -102,22 +138,28 @@ Risk Factors:
 • Regulatory changes in key sectors
     `
 
-    const savedInsight = await saveMarketInsight("Daily Market Intelligence Report", sampleInsight, "daily", 0.87)
+    // const savedInsight = await saveMarketInsight("Daily Market Intelligence Report", sampleInsight, "daily", 0.87)
+    const savedInsight = null; // Placeholder
+    */
 
     return NextResponse.json({
       success: true,
-      message: "Sample data seeded successfully",
+      message: "Sample articles seeded successfully", // Updated message
       data: {
         articles: savedArticles.length,
-        insights: savedInsight ? 1 : 0,
+        // insights: savedInsight ? 1 : 0, // Commented out insight part
       },
     })
   } catch (error) {
     console.error("Seeding error:", error)
+    let errorMessage = "Failed to seed sample data";
+    if (error instanceof Error) {
+        errorMessage = error.message;
+    }
     return NextResponse.json(
       {
         success: false,
-        error: "Failed to seed sample data",
+        error: errorMessage,
       },
       { status: 500 },
     )

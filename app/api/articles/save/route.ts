@@ -1,5 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { saveUserArticle, removeUserArticle } from "@/lib/database"
+import { saveUserArticle, removeUserArticle } from "@/lib/db" // Updated import path
 
 export async function POST(request: NextRequest) {
   try {
