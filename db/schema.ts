@@ -48,7 +48,8 @@ export const verificationTokens = pgTable("verification_token", {
 }));
 
 export const authenticators = pgTable("authenticator", {
-    credentialID: text("credentialID").notNull().unique(), // Unique ID for the credential
+    id: text("id").notNull().primaryKey(), // Added to align with Prisma's expectation for an @id
+    credentialID: text("credentialID").notNull().unique(), // Kept as unique
     userId: text("userId")
         .notNull()
         .references(() => users.id, { onDelete: "cascade" }),

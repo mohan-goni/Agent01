@@ -118,26 +118,35 @@ async def handle_run_analysis(request: RunAnalysisRequest):
         # The 'result' dict from run_market_intelligence_agent should align with RunAnalysisResponse fields.
         # Pydantic will validate this. If fields are missing from `result` that are not Optional
         # and don't have defaults in RunAnalysisResponse, it will error.
+
+        if not result.get("success"):
+            error_msg = result.get("error") or "Agent workflow failed without a specific error message."
+            logger.error(f"Agent workflow indicated failure for Query='{request.query_str}', Domain='{request.market_domain_str}'. Error: {error_msg}")
+            # Raise HTTPException for agent-reported failures
+            # The actual result dictionary (which includes success=False and error message)
+            # might still be useful to the client, so we could pass it in detail.
+            # However, standard HTTPException detail is a string.
+            # For now, just pass the error message as detail.
+            raise HTTPException(
+                status_code=500, # Internal Server Error, as the agent process itself failed
+                detail=error_msg
+            )
+            # Note: If we wanted to return the full error structure (RunAnalysisResponse with success=false),
+            # we would not raise HTTPException here, but instead do:
+            # return JSONResponse(status_code=500, content=jsonable_encoder(RunAnalysisResponse(**result)))
+            # But this makes client-side error handling more complex as it needs to check both HTTP status and JSON body.
+            # Raising HTTPException is more conventional for signalling API errors via HTTP status codes.
+
         return RunAnalysisResponse(**result)
 
-    except Exception as e:
-        error_detail = f"Error during full market analysis: {str(e)}"
+    except HTTPException as he: # Re-raise HTTPExceptions explicitly
+        raise he
+    except Exception as e: # Catch any other unexpected errors during the call or processing
+        error_detail = f"Unexpected error in /run-analysis endpoint: {str(e)}"
         logger.error(error_detail, exc_info=True)
-        # Return a structured error response matching RunAnalysisResponse
-        return RunAnalysisResponse(
-            success=False,
-            error=error_detail,
-            state_id=None,
-            query_response=None,
-            report_dir_relative=None,
-            report_filename=None,
-            chart_filenames=[],
-            data_json_filename=None,
-            data_csv_filename=None,
-            readme_filename=None,
-            log_filename=None,
-            rag_log_filename=None,
-            vector_store_dirname=None
+        raise HTTPException(
+            status_code=500,
+            detail=error_detail
         )
 
 @app.get("/health", summary="Health Check", description="Simple health check endpoint.")
