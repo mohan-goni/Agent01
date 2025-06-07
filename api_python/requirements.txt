@@ -5,11 +5,9 @@ pydantic
 # Langchain stack
 langchain
 langchain-core
-langgraph # Added: For StateGraph
+langgraph
 langchain_community
-langchain-google-genai # Added: For init_chat_model with "google_genai" provider (Gemini)
-# langchain-openai # Removed: Assuming primary LLM is Google GenAI as per agent code
-# openai # Removed: Assuming primary LLM is Google GenAI
+langchain-google-genai # For init_chat_model with "google_genai" provider (Gemini)
 
 # Vector Store and Embeddings
 sentence-transformers # For HuggingFaceEmbeddings
@@ -17,7 +15,7 @@ faiss-cpu # For FAISS vector store
 
 # Web requests and utilities
 requests # For Tavily API calls and WebBaseLoader sub-dependency
-beautifulsoup4 # Often a good companion for WebBaseLoader for parsing HTML
+beautifulsoup4 # For WebBaseLoader, helps parse HTML
 
 # Environment and Async/Retry
 python-dotenv # For .env file loading
@@ -28,7 +26,7 @@ cachetools # For TTLCache
 google-generativeai # Explicitly listed, might be used by init_chat_model or directly
 
 # Notes:
-# - Ensure API keys (TAVILY_API_KEY, GOOGLE_API_KEY) are set in the Vercel environment.
+# - Ensure API keys (TAVILY_API_KEY, GOOGLE_API_KEY) are set in the Vercel environment for the Python function.
 # - Versions can be pinned for more stable deployments (e.g., fastapi==0.100.0).
-# - sqlite3 is part of Python's standard library, no need to list it.
-# - csv, json, shutil, re, datetime, typing, uuid, os, traceback, argparse are standard libraries.
+# - Standard libraries like sqlite3, csv, json, shutil, re, datetime, typing, uuid, os, traceback, argparse
+#   are part of Python and do not need to be listed here.
