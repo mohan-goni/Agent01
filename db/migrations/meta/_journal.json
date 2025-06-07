@@ -15,6 +15,13 @@
       "when": 1749215877568,
       "tag": "0001_plain_sleeper",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1749274161639,
+      "tag": "0002_thick_pepper_potts",
+      "breakpoints": true
     }
   ]
 }
