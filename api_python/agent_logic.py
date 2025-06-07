@@ -74,20 +74,16 @@ search_results_cache = TTLCache(maxsize=100, ttl=3600) # Renamed for clarity
 
 def init_db():
     db_name = 'market_intelligence_agent.db' # Specific DB name
+    db_path = "" # Initialize to ensure it's in scope for logging
     try:
-        # Ensure the database is created in a writable location, especially for Vercel.
-        # Vercel's ephemeral filesystem is writable at /tmp
-        # For local dev, same directory is fine if permissions allow.
-        # For serverless, it's better to ensure paths are explicitly handled.
-        # However, sqlite3.connect() can create the file in the current working directory.
-        # On Vercel, the current working directory for a Python serverless function is usually /var/task.
-        # Let's try to place it in /tmp for Vercel, or current dir for local.
         if os.environ.get("VERCEL_ENV"):
             db_path = os.path.join("/tmp", db_name)
             logger.info(f"Using Vercel /tmp path for database: {db_path}")
         else:
-            db_path = db_name # Current directory for local
-            logger.info(f"Using local path for database: {os.path.abspath(db_path)}")
+            # For local, place it inside api_python to keep project root clean
+            api_python_dir = os.path.dirname(os.path.abspath(__file__))
+            db_path = os.path.join(api_python_dir, db_name)
+            logger.info(f"Using local path for database: {db_path}")
 
         conn = sqlite3.connect(db_path)
         cursor_obj = conn.cursor() # Renamed
@@ -113,7 +109,7 @@ def init_db():
         conn.close()
         logger.info(f"Database '{db_path}' initialized/verified successfully.")
     except Exception as e_db_init: # Renamed
-        error_logger.error(f"Failed to initialize database '{db_name}': {e_db_init} (Path attempted: {db_path if 'db_path' in locals() else 'N/A'})")
+        error_logger.error(f"Failed to initialize database '{db_name}': {e_db_init} (Path attempted: {db_path})")
         raise # Re-raise to indicate critical failure
 
 init_db() # Call on module load
@@ -158,7 +154,10 @@ def get_db_path():
     db_name = 'market_intelligence_agent.db'
     if os.environ.get("VERCEL_ENV"):
         return os.path.join("/tmp", db_name)
-    return db_name
+    else:
+        api_python_dir = os.path.dirname(os.path.abspath(__file__))
+        return os.path.join(api_python_dir, db_name)
+
 
 def save_state(state_obj: MarketIntelligenceState): # Renamed
     db_path = get_db_path()
@@ -218,11 +217,6 @@ def load_chat_history(session_id_val: str) -> List[Dict[str, Any]]: # Renamed fo
         messages_history_list = [{"type": row[0], "content": row[1]} for row in cursor_obj.fetchall()] # Renamed
         conn.close()
         logger.info(f"Chat history loaded: SessionID='{session_id_val}', Messages Count={len(messages_history_list)} from {db_path}")
-        # Convert to Langchain messages if needed by the actual agent logic, but FastAPI returns this simple list
-        # For FastAPI, ensure this list of dicts is what main.py expects.
-        # The FastAPI endpoint will pass this to chat_with_agent.
-        # The chat_with_agent function itself needs to be compatible with this format OR convert it.
-        # For now, this function returns List[Dict], which is what the previous placeholder did.
         return messages_history_list
     except Exception as e_load_chat: # Renamed
         error_logger.error(f"Failed to load chat history for SessionID '{session_id_val}' from {db_path}: {e_load_chat}")
@@ -275,8 +269,7 @@ def fetch_url_content(url_to_fetch: str) -> Dict[str, Any]: # Renamed
 
         if doc_object:
             raw_page_content = doc_object.page_content # Renamed
-            # Corrected re.sub call to handle newlines properly
-            cleaned_page_content = re.sub(r'\n\s*\n', '\n\n', raw_page_content).strip()
+            cleaned_page_content = re.sub(r'\n\s*\n', '\n\n', raw_page_content).strip() # Corrected re.sub
             summary_text = cleaned_page_content[:1000] # Increased summary length
             document_title = doc_object.metadata.get("title", "") or os.path.basename(url_to_fetch) # Renamed
             if not document_title: document_title = "Untitled Document"
@@ -291,10 +284,17 @@ def fetch_url_content(url_to_fetch: str) -> Dict[str, Any]: # Renamed
         return {"source": url_to_fetch, "title": f"Failed to Load: {os.path.basename(url_to_fetch)}", "summary": str(e_fetch_url), "full_content": "", "url": url_to_fetch}
 
 def get_agent_base_reports_dir():
-    agent_file_dir_path = os.path.dirname(os.path.abspath(__file__))
-    base_reports_dir = os.path.join(agent_file_dir_path, "reports1")
+    # Get the directory where agent_logic.py is located
+    agent_script_dir = os.path.dirname(os.path.abspath(__file__))
+    # Default base for reports, relative to the script location (api_python/reports1)
+    base_reports_dir = os.path.join(agent_script_dir, "reports1")
+
     if os.environ.get("VERCEL_ENV"): # Use /tmp for reports on Vercel
         base_reports_dir = os.path.join("/tmp", "reports1")
+        logger.info(f"Vercel environment detected. Using /tmp/reports1 for reports base.")
+    else:
+        logger.info(f"Local environment. Using {base_reports_dir} for reports base.")
+
     os.makedirs(base_reports_dir, exist_ok=True)
     return base_reports_dir
 
@@ -362,16 +362,20 @@ def market_data_collector(current_state: MarketIntelligenceState) -> Dict[str, A
 
 def llm_json_parser_robust(llm_output_str: str, default_return_val: Any = None) -> Any: # Renamed
     logger.debug(f"LLM JSON Parser: Attempting to parse: {llm_output_str[:200]}...") # Debug level
+    json_str_to_parse = ""
     try:
+        # Remove markdown fences and strip whitespace
         cleaned_llm_output = re.sub(r"```json\s*([\s\S]*?)\s*```", r"", llm_output_str.strip(), flags=re.IGNORECASE)
-        # Try to find the first '{' or '['
+
         start_brace = cleaned_llm_output.find('{')
         start_bracket = cleaned_llm_output.find('[')
 
-        if start_brace == -1 and start_bracket == -1: # No JSON structure found
+        if start_brace == -1 and start_bracket == -1:
              logger.warning(f"LLM JSON Parser: No JSON object/array start found. Output: {cleaned_llm_output[:200]}")
              return default_return_val if default_return_val is not None else []
 
+        json_start_char = ''
+        json_start_index = -1
         if start_brace != -1 and (start_bracket == -1 or start_brace < start_bracket):
             json_start_char = '{'
             json_start_index = start_brace
@@ -379,8 +383,6 @@ def llm_json_parser_robust(llm_output_str: str, default_return_val: Any = None) 
             json_start_char = '['
             json_start_index = start_bracket
 
-        # Attempt to find matching closing brace/bracket
-        # This is a simplified balancer, might not cover all edge cases like nested strings with braces
         open_count = 0
         json_end_index = -1
         for i in range(json_start_index, len(cleaned_llm_output)):
@@ -399,12 +401,11 @@ def llm_json_parser_robust(llm_output_str: str, default_return_val: Any = None) 
             return default_return_val if default_return_val is not None else []
 
         json_str_to_parse = cleaned_llm_output[json_start_index : json_end_index + 1]
-
         parsed_json = json.loads(json_str_to_parse)
         logger.debug("LLM JSON Parser: Successfully parsed JSON.")
         return parsed_json
-    except json.JSONDecodeError as e_json_decode: # Renamed
-        error_logger.warning(f"LLM JSON Parser: Parsing failed: {e_json_decode}. String attempted: '{json_str_to_parse if 'json_str_to_parse' in locals() else cleaned_llm_output[:500]}'")
+    except json.JSONDecodeError as e_json_decode:
+        error_logger.warning(f"LLM JSON Parser: Parsing failed: {e_json_decode}. String attempted: '{json_str_to_parse if json_str_to_parse else cleaned_llm_output[:500]}'")
         return default_return_val if default_return_val is not None else []
 
 
@@ -412,7 +413,6 @@ def trend_analyzer(current_state: MarketIntelligenceState) -> Dict[str, Any]:
     logger.info(f"Trend Analyzer: Domain='{current_state.market_domain}'")
     default_trends_list = [{"trend_name": "Default Trend", "description": "No specific trends identified.", "supporting_evidence": "N/A", "estimated_impact": "Unknown", "timeframe": "Unknown"}]
     try:
-        # Ensure GOOGLE_API_KEY is loaded for Gemini
         if not os.getenv("GOOGLE_API_KEY"):
             error_logger.critical("GOOGLE_API_KEY not found for Trend Analyzer (Gemini).")
             raise ValueError("GOOGLE_API_KEY is not set.")
@@ -549,13 +549,12 @@ def report_template_generator(current_state: MarketIntelligenceState) -> Dict[st
     return current_state.model_dump()
 
 def get_vector_store_path(current_state: MarketIntelligenceState) -> str:
-    """Generates a writable path for the vector store, preferring /tmp on Vercel."""
-    base_dir = get_agent_base_reports_dir() # This will be /tmp/reports1 on Vercel
+    base_dir = get_agent_base_reports_dir()
     report_specific_dir = current_state.report_dir or os.path.join(base_dir, f"VS_FALLBACK_{current_state.state_id[:4]}")
-    if not os.path.isabs(report_specific_dir): # Ensure it's absolute if somehow relative
+    if not os.path.isabs(report_specific_dir):
         report_specific_dir = os.path.join(base_dir, report_specific_dir)
 
-    os.makedirs(report_specific_dir, exist_ok=True) # Ensure directory exists
+    os.makedirs(report_specific_dir, exist_ok=True)
     return os.path.join(report_specific_dir, f"vector_store_faiss_{current_state.state_id[:4]}")
 
 
@@ -617,9 +616,9 @@ Content: {content}",
             embeddings_vs = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2", model_kwargs={'device': 'cpu'})
             faiss_index = FAISS.from_texts(texts_for_vs, embeddings_vs, metadatas=metadatas_for_vs)
 
-            vs_save_path = get_vector_store_path(current_state) # Use helper for path
+            vs_save_path = get_vector_store_path(current_state)
             faiss_index.save_local(vs_save_path)
-            current_state.vector_store_path = vs_save_path # Store absolute path
+            current_state.vector_store_path = vs_save_path
             logger.info(f"VS Setup: FAISS index saved to: {vs_save_path} with {len(texts_for_vs)} chunks.")
     except Exception as e_vs_create:
         error_logger.error(f"VS Setup: Failed to create FAISS index: {e_vs_create}
@@ -634,7 +633,7 @@ def rag_query(current_state: MarketIntelligenceState) -> Dict[str, Any]:
     logger.info(f"RAG Query: Question='{current_state.question or 'N/A'}'")
     if not current_state.question:
         current_state.query_response = "No question provided for RAG."
-        save_state(current_state) # Save state even if no question
+        save_state(current_state)
         return current_state.model_dump()
 
     vs_path_to_load = current_state.vector_store_path
@@ -653,7 +652,7 @@ def rag_query(current_state: MarketIntelligenceState) -> Dict[str, Any]:
         if not os.getenv("GOOGLE_API_KEY"):
             error_logger.critical("GOOGLE_API_KEY not found for RAG Query (Gemini).")
             raise ValueError("GOOGLE_API_KEY is not set.")
-        llm_rag = init_chat_model(model_name="gemini-pro", model_provider="google_genai", temperature=0.0) # Changed model
+        llm_rag = init_chat_model(model_name="gemini-pro", model_provider="google_genai", temperature=0.0)
 
         rag_chain_prompt = ChatPromptTemplate.from_messages([
             ("system", "You are an AI assistant. Answer the question based ONLY on the provided context documents. If the answer isn't in the context, say 'The provided information does not contain an answer to this question.' Be concise. Cite source URLs or titles from metadata if available and relevant."),
@@ -675,7 +674,6 @@ Answer:")
             cite = meta.get('title') or meta.get('url') or meta.get('source', 'Unknown Source')
             cited_sources_rag.append(cite)
 
-        # Ensure report_dir exists for logging RAG responses
         if not current_state.report_dir or not os.path.isdir(current_state.report_dir):
              current_state.report_dir = os.path.join(get_agent_base_reports_dir(), f"RAG_LOG_FALLBACK_DIR_{current_state.state_id[:4]}")
              os.makedirs(current_state.report_dir, exist_ok=True)
@@ -700,67 +698,32 @@ Sources: {'; '.join(cited_sources_rag) or 'N/A'}
     logger.info(f"RAG Query: Node completed. Response preview: '{rag_answer[:100]}...'")
     return current_state.model_dump()
 
-# Renamed generate_charts to generate_report_charts to avoid conflict
-def generate_report_charts(current_state: MarketIntelligenceState, output_dir_charts: str): # Renamed param
+def generate_report_charts(current_state: MarketIntelligenceState, output_dir_charts: str):
     logger.info(f"Chart Generation: Attempting to generate charts in {output_dir_charts}")
-    chart_data_map = { # Renamed
+    chart_data_map = {
         "market_growth_data": {"type": "line", "data": {"years": [2020, 2021, 2022, 2023], "growth_rate": [0.05, 0.07, 0.06, 0.08]}},
         "competitor_share_data": {"type": "bar", "data": {"competitors": ["A", "B", "C"], "market_share": [0.4, 0.3, 0.2]}},
         "trend_impact_data": {"type": "bar", "data": {"trends": ["AI", "Remote Work", "Sustainability"], "impact_score": [0.8, 0.6, 0.7]}}
     }
-    # This is where you'd call the actual generate_charts_export or its fallback
     try:
-        # The `generate_charts_export` function is expected to take data and output_dir
-        # and return a list of filenames (relative to output_dir_charts)
-        # For this example, we'll simulate this based on the chart_data_map
-        created_chart_filenames = [] # Renamed
-        # Simulate calling generate_charts_export for each item in chart_data_map
-        # Actual implementation of generate_charts_export would handle the data and chart type.
-        for chart_key, chart_info in chart_data_map.items():
-            # This is a mock call; the actual generate_charts_export would do the work
-            # We pass a dictionary that might include 'type' and 'data' as generate_charts_export might expect
-            simulated_chart_data = {"name": chart_key, **chart_info}
-            # The export function should save files like "market_growth_data.png" in output_dir_charts
-            # For now, the fallback creates generic names. We need to align this.
-            # Let's assume generate_charts_export returns filenames like "market_growth_data.png"
-
-            # Using the fallback's behavior for naming for now
-            if chart_key == "market_growth_data": fn = "market_growth.png"
-            elif chart_key == "competitor_share_data": fn = "competitor_share.png"
-            else: fn = "trend_impact.png" # from default_chart_filenames_list in fallback
-
-            # To make the fallback work as if it was called for each:
-            # We'd need to call generate_charts_export with specific data to get specific names,
-            # or modify fallback to return names based on input.
-            # For now, let's assume the fallback creates its default set once.
-            # A better simulation would be:
-            # chart_filename = generate_charts_export(simulated_chart_data, output_dir_charts) # if it returns one filename
-            # created_chart_filenames.extend(chart_filename) # if it returns a list
-
-        # Since the fallback generate_charts_export creates a fixed list of placeholders,
-        # we just call it once and use its output.
-        # This means the chart_data_map isn't directly used by the fallback in this simulation.
-        # A real generate_charts module would iterate chart_data_map.
-
         current_state.chart_paths = generate_charts_export(chart_data_map, output_dir_charts)
         logger.info(f"Chart Generation: Charts generated: {current_state.chart_paths}")
-
-    except Exception as e_charts_main: # Renamed
+    except Exception as e_charts_main:
         error_logger.error(f"Chart Generation: Main process failed: {e_charts_main}
 {traceback.format_exc()}")
-        current_state.chart_paths = [] # Ensure it's an empty list on failure
+        current_state.chart_paths = []
 
-def verify_report_file(file_path_to_check: str) -> bool: # Renamed
+def verify_report_file(file_path_to_check: str) -> bool:
     if not file_path_to_check or not os.path.exists(file_path_to_check):
         error_logger.error(f"Report Verification: File not found at '{file_path_to_check}'")
         return False
     if os.path.getsize(file_path_to_check) == 0:
         error_logger.warning(f"Report Verification: File is empty at '{file_path_to_check}'")
-        return False # Or True if empty is permissible for some reason
+        return False
     logger.info(f"Report Verification: File '{file_path_to_check}' exists and is not empty.")
     return True
 
-def generate_readme(current_state: MarketIntelligenceState, output_dir_readme: str, report_filename_readme: str): # Renamed
+def generate_readme(current_state: MarketIntelligenceState, output_dir_readme: str, report_filename_readme: str):
     readme_content_str = f"""# Market Intelligence Report: {current_state.market_domain}
 
 **Query:** {current_state.query or "N/A"}
@@ -772,25 +735,25 @@ def generate_readme(current_state: MarketIntelligenceState, output_dir_readme: s
 *   **Main Report:** [{report_filename_readme}](./{report_filename_readme})
 *   **Data (JSON):** [{current_state.market_domain.lower().replace(' ', '_')}_data_sources.json](./{current_state.market_domain.lower().replace(' ', '_')}_data_sources.json)
 *   **Data (CSV):** [{current_state.market_domain.lower().replace(' ', '_')}_data_sources.csv](./{current_state.market_domain.lower().replace(' ', '_')}_data_sources.csv)
-*   **Vector Store:** {'Present' if current_state.vector_store_path else 'Not Generated'} (Subdirectory: `vector_store_faiss_{current_state.state_id[:4]}` if present)
-*   **Execution Log:** [market_intelligence.log](./market_intelligence.log) (Main agent log)
+*   **Vector Store:** {'Present' if current_state.vector_store_path else 'Not Generated'} (Subdirectory: `{os.path.basename(current_state.vector_store_path)}` if present)
+*   **Execution Log:** [market_intelligence_run.log](./market_intelligence_run.log) (Copied run log)
 *   **RAG Log:** [rag_responses_{current_state.state_id[:4]}.log](./rag_responses_{current_state.state_id[:4]}.log) (If RAG queries were made)
 
 ## Charts
 """
-    for chart_file in current_state.chart_paths:
+    for chart_file in current_state.chart_paths: # chart_paths should be relative to output_dir_readme
         readme_content_str += f"*   ![{os.path.splitext(chart_file)[0].replace('_', ' ').title()}]({chart_file})
 "
     readme_content_str += "
 ## Notes
 This report was automatically generated by the Market Intelligence Agent.
 "
-    readme_file_path = os.path.join(output_dir_readme, "README.md") # Renamed
+    readme_file_path = os.path.join(output_dir_readme, "README.md")
     try:
         with open(readme_file_path, "w", encoding="utf-8") as f:
             f.write(readme_content_str)
         logger.info(f"README generated at: {readme_file_path}")
-    except Exception as e_readme: # Renamed
+    except Exception as e_readme:
         error_logger.error(f"Failed to generate README.md: {e_readme}")
 
 
@@ -811,7 +774,7 @@ def generate_market_intelligence_report(current_state: MarketIntelligenceState) 
     current_state.strategic_recommendations = current_state.strategic_recommendations or []
     current_state.competitor_data = current_state.competitor_data or []
     current_state.raw_news_data = current_state.raw_news_data or []
-    current_state.chart_paths = current_state.chart_paths or []
+    # current_state.chart_paths = current_state.chart_paths or [] # chart_paths initialized in generate_report_charts
 
     report_data_for_llm = {
         "market_domain": current_state.market_domain,
@@ -828,22 +791,21 @@ def generate_market_intelligence_report(current_state: MarketIntelligenceState) 
     report_filename_md = f"{current_state.market_domain.lower().replace(' ', '_')}_report_{current_state.state_id[:4]}.md"
     report_full_path_md = os.path.join(output_dir_report, report_filename_md)
 
-    # Ensure agent_logs directory exists for copying main log
-    agent_logs_dir = os.path.dirname(os.path.abspath(__file__)) # Should be api_python/
-    main_exec_log_path = os.path.join(agent_logs_dir, "market_intelligence.log") # Correct path to main log
-    log_file_copy_path = os.path.join(output_dir_report, "market_intelligence_run.log") # Copied log
+    agent_script_dir = os.path.dirname(os.path.abspath(__file__))
+    main_exec_log_path = os.path.join(agent_script_dir, "market_intelligence.log")
+    log_file_copy_path = os.path.join(output_dir_report, "market_intelligence_run.log")
 
     final_generated_markdown = ""
     try:
         logger.info("Report Generation: Generating charts.")
         generate_report_charts(current_state, output_dir_report)
-        report_data_for_llm["chart_filenames"] = current_state.chart_paths
+        report_data_for_llm["chart_filenames"] = current_state.chart_paths # chart_paths is now populated
 
         logger.info(f"Report Generation: Initializing LLM for markdown. Charts: {current_state.chart_paths}")
         if not os.getenv("GOOGLE_API_KEY"):
             error_logger.critical("GOOGLE_API_KEY not found for Report Generation (Gemini).")
             raise ValueError("GOOGLE_API_KEY is not set.")
-        llm_report = init_chat_model(model_name="gemini-pro", model_provider="google_genai", temperature=0.1) # Use gemini-pro
+        llm_report = init_chat_model(model_name="gemini-pro", model_provider="google_genai", temperature=0.1)
 
         if current_state.report_template:
             logger.info("Report Generation: Using existing template.")
@@ -862,9 +824,9 @@ Chart Filenames (comma-separated):
             final_generated_markdown = chain.invoke({
                 "template_content": current_state.report_template,
                 "json_report_data": json.dumps(report_data_for_llm),
-                "csv_chart_filenames": ", ".join(current_state.chart_paths)
+                "csv_chart_filenames": ", ".join(current_state.chart_paths or [])
             })
-        else: # Fallback to scratch generation
+        else:
             logger.warning("Report Generation: No template found, generating from scratch.")
             prompt = ChatPromptTemplate.from_messages([
                  ("system", f"Generate a comprehensive markdown report for {current_state.market_domain} based on the query '{current_state.query or 'general analysis'}'. Include sections: Executive Summary, Key Market Trends, Identified Opportunities, Strategic Recommendations, Competitive Landscape, and Visualizations. Refer to charts by filename (e.g., ![Chart Description](chart_filename.png)). Date: {timestamp_report_gen}. Prepared By: Market Intelligence Agent. Do not use ```markdown``` fences."),
@@ -877,14 +839,14 @@ Chart Filenames (comma-separated):
             chain = prompt | llm_report | StrOutputParser()
             final_generated_markdown = chain.invoke({
                 "json_report_data": json.dumps(report_data_for_llm),
-                "csv_chart_filenames": ", ".join(current_state.chart_paths)
+                "csv_chart_filenames": ", ".join(current_state.chart_paths or [])
             })
 
         final_generated_markdown = final_generated_markdown.replace("```markdown", "").replace("```", "").strip()
         if not final_generated_markdown:
             logger.error("Report Generation: LLM returned empty string for report content. Using fallback.")
             chart_refs_str = "
-".join([f"![{fn}]({fn})" for fn in current_state.chart_paths])
+".join([f"![{fn}]({fn})" for fn in (current_state.chart_paths or [])])
             final_generated_markdown = f"# Fallback Report: {current_state.market_domain}
 
 LLM failed to generate content.
@@ -937,9 +899,8 @@ def create_market_intelligence_workflow() -> StateGraph:
     workflow_instance.add_edge("strategy_recommender", "report_template_generator")
     workflow_instance.add_edge("report_template_generator", "setup_vector_store")
 
-    # Conditional edge: if question is provided, go to rag_query, else go to generate_final_report
-    def should_run_rag(state_dict: dict) -> str:
-        state = MarketIntelligenceState(**state_dict)
+    def should_run_rag(state: MarketIntelligenceState) -> str: # Changed to take MarketIntelligenceState
+        # state_data = state if isinstance(state, dict) else state.model_dump() # Already a model if typed in StateGraph
         if state.question and state.vector_store_path:
             logger.info("Conditional Edge: Question and vector store present, proceeding to RAG query.")
             return "rag_query"
@@ -965,33 +926,30 @@ def run_market_intelligence_agent(query_str: str = "Market analysis", market_dom
     run_start_ts = datetime.now()
     logger.info(f"Agent Run: Started at {run_start_ts.isoformat()}. Query='{query_str}', Domain='{market_domain_str}', Question='{question_str or 'N/A'}'")
 
-    required_env_vars = ["TAVILY_API_KEY", "GOOGLE_API_KEY"] # Or specific GenAI key for init_chat_model
+    required_env_vars = ["TAVILY_API_KEY", "GOOGLE_API_KEY"]
     missing_vars = [var for var in required_env_vars if not os.getenv(var)]
     if missing_vars:
         msg = f"Missing critical environment variables: {', '.join(missing_vars)}. Agent cannot proceed."
         error_logger.critical(msg)
-        return {"success": False, "error": msg, "state_id": None, "report_path": None, "report_dir_relative": None}
+        return {"success": False, "error": msg, "state_id": None, "report_dir_relative": None, "report_filename": None, "chart_filenames": [], "data_json_filename": None, "data_csv_filename": None, "readme_filename": None, "log_filename": None, "rag_log_filename": None, "vector_store_dirname": None, "query_response": None }
 
     agent_base_reports_dir = get_agent_base_reports_dir()
     try:
-        # Quick permission check
         temp_perm_test_file = os.path.join(agent_base_reports_dir, f".perm_{uuid4()}.tmp")
         with open(temp_perm_test_file, "w") as f: f.write("ok")
         os.remove(temp_perm_test_file)
     except Exception as e_base_dir_perm:
         msg = f"CRITICAL: No write permission to base reports directory '{agent_base_reports_dir}'. Error: {e_base_dir_perm}"
         error_logger.critical(msg)
-        return {"success": False, "error": msg, "state_id": None, "report_path": None, "report_dir_relative": None}
+        return {"success": False, "error": msg, "state_id": None, "report_dir_relative": None, "report_filename": None, "chart_filenames": [], "data_json_filename": None, "data_csv_filename": None, "readme_filename": None, "log_filename": None, "rag_log_filename": None, "vector_store_dirname": None, "query_response": None }
 
     compiled_agent_workflow = create_market_intelligence_workflow()
     current_run_initial_state = MarketIntelligenceState(query=query_str, market_domain=market_domain_str, question=question_str)
-    final_run_state_dict = {}
 
     try:
         logger.info(f"Agent Run: Invoking workflow. State ID: {current_run_initial_state.state_id}")
-        # LangGraph's invoke can take the Pydantic model directly if the state is typed with it.
         final_run_state_dict = compiled_agent_workflow.invoke(current_run_initial_state)
-        final_run_state = MarketIntelligenceState(**final_run_state_dict) # Reconstruct for type safety if needed, or use directly
+        final_run_state = MarketIntelligenceState(**final_run_state_dict)
         logger.info(f"Agent Run: Workflow completed. Final State ID: {final_run_state.state_id}")
 
         if not final_run_state.report_dir or not os.path.isdir(final_run_state.report_dir):
@@ -1001,9 +959,7 @@ def run_market_intelligence_agent(query_str: str = "Market analysis", market_dom
             final_run_state.report_dir = os.path.join(agent_base_reports_dir, f"{fallback_query}_{fallback_ts}_FINAL_RUN_ERROR_DIR")
             os.makedirs(final_run_state.report_dir, exist_ok=True)
             try:
-                error_readme_content = f"# Agent Run Error
-
-Workflow completed but report directory was invalid. Fallback directory: {final_run_state.report_dir}"
+                error_readme_content = f"# Agent Run Error..."
                 with open(os.path.join(final_run_state.report_dir, "README_ERROR.md"), "w") as f_err_readme:
                     f_err_readme.write(error_readme_content)
             except: pass
@@ -1012,37 +968,27 @@ Workflow completed but report directory was invalid. Fallback directory: {final_
         report_md_file_path = os.path.join(output_directory_path, f"{final_run_state.market_domain.lower().replace(' ', '_')}_report_{final_run_state.state_id[:4]}.md")
         is_final_report_valid = verify_report_file(report_md_file_path)
 
-        # Use os.path.relpath from the perspective of where Vercel serves the api_python contents from
-        # which is typically the root of the serverless function, i.e., api_python/
-        # So, if report_dir is /tmp/reports1/some_run, and agent_file_dir_path is /var/task (where agent_logic.py is)
-        # this relative path needs careful consideration for how files will be served or accessed.
-        # For serving static files from Vercel, they usually need to be in `public` or output from a build.
-        # Python serverless functions on Vercel can write to /tmp.
-        # If we want to make report files downloadable via Next.js, we'd need another mechanism.
-        # For now, this relative path is more for internal reference or if an admin could list /tmp.
-        # Let's assume for now that `report_dir_relative` is relative to the `api_python` directory if possible,
-        # or make it relative to a known point if files are served.
-        # Since get_agent_base_reports_dir() might be /tmp/reports1, we make it relative to /tmp.
         report_dir_for_client = output_directory_path
         if output_directory_path.startswith("/tmp/"):
-            report_dir_for_client = os.path.relpath(output_directory_path, "/tmp") # e.g. "reports1/query_timestamp"
+            report_dir_for_client = os.path.relpath(output_directory_path, "/tmp")
 
         response_object = {
             "success": is_final_report_valid, "state_id": final_run_state.state_id,
             "query_response": final_run_state.query_response,
             "report_dir_relative": report_dir_for_client,
             "report_filename": os.path.basename(report_md_file_path) if is_final_report_valid else None,
-            "chart_filenames": final_run_state.chart_paths,
+            "chart_filenames": final_run_state.chart_paths or [], # Ensure it's a list
             "data_json_filename": f"{final_run_state.market_domain.lower().replace(' ', '_')}_data_sources.json",
             "data_csv_filename": f"{final_run_state.market_domain.lower().replace(' ', '_')}_data_sources.csv",
             "readme_filename": "README.md",
-            "log_filename": "market_intelligence_run.log", # Copied log
+            "log_filename": "market_intelligence_run.log",
             "rag_log_filename": f"rag_responses_{final_run_state.state_id[:4]}.log",
             "vector_store_dirname": os.path.basename(final_run_state.vector_store_path) if final_run_state.vector_store_path else None,
         }
         if not is_final_report_valid:
-            response_object["error"] = response_object.get("error", "") + f" Critical: Main report Markdown file not found or invalid at '{report_md_file_path}'."
-            error_logger.error(response_object["error"])
+            error_msg_report = f"Critical: Main report Markdown file not found or invalid at '{report_md_file_path}'."
+            response_object["error"] = (response_object.get("error", "") + " " + error_msg_report).strip()
+            error_logger.error(error_msg_report)
 
         logger.info(f"Agent Run: Finished. Success: {response_object['success']}. Report relative dir: {response_object['report_dir_relative']}")
         return response_object
@@ -1053,7 +999,7 @@ Workflow completed but report directory was invalid. Fallback directory: {final_
 {tb_str}")
 
         error_state_id = current_run_initial_state.state_id
-        agent_base_reports_dir_err = get_agent_base_reports_dir() # Ensures it's /tmp on Vercel
+        agent_base_reports_dir_err = get_agent_base_reports_dir()
         error_report_dir_path = os.path.join(agent_base_reports_dir_err, f"CRITICAL_ERROR_{error_state_id[:8]}_{datetime.now().strftime('%Y%m%d%H%M%S')}")
         error_report_file_path = None
         try:
@@ -1061,14 +1007,25 @@ Workflow completed but report directory was invalid. Fallback directory: {final_
             error_report_filename_val = f"AGENT_WORKFLOW_ERROR_{error_state_id[:4]}.md"
             error_report_file_path = os.path.join(error_report_dir_path, error_report_filename_val)
             with open(error_report_file_path, "w", encoding="utf-8") as f_crit_report:
-                f_crit_report.write(f"# Agent Workflow Critical Error...") # Content as before
+                f_crit_report.write(f"# Agent Workflow Critical Error
+
+Timestamp: {run_start_ts.isoformat()}
+Query: {query_str}
+Domain: {market_domain_str}
+State ID: {error_state_id}
+
+Error: {str(e_agent_run)}
+
+Traceback:
+```
+{tb_str}
+```")
         except Exception as e_emergency_dir_write:
             error_logger.critical(f"Agent Run: FAILED TO WRITE EMERGENCY ERROR REPORT to '{error_report_dir_path}': {e_emergency_dir_write}")
 
         error_report_dir_for_client = error_report_dir_path
-        if error_report_dir_path.startswith("/tmp/"):
+        if error_report_dir_path and error_report_dir_path.startswith("/tmp/"): # Check if not None
             error_report_dir_for_client = os.path.relpath(error_report_dir_path, "/tmp")
-
 
         return {
             "success": False, "error": f"Critical agent workflow failure: {str(e_agent_run)}",
@@ -1081,27 +1038,18 @@ Workflow completed but report directory was invalid. Fallback directory: {final_
             "query_response": None
         }
 
-# This is the chat function to be used by FastAPI
-# It's a simplified interaction, not running the full RAG pipeline for each chat message,
-# but rather interacting with a pre-existing vector store or just simple LLM chat with history.
-# The actual RAG happens via run_market_intelligence_agent and its RAG node.
-# This chat_with_agent is for general Q&A or if a vector store is already loaded for a session.
 def chat_with_agent(message: str, session_id: str, history: List[Dict[str, Any]]) -> str:
     logger.info(f"Agent Chat: Received message for session_id {session_id}: '{message}'")
     save_chat_message(session_id, "user", message)
 
-    # Convert history from List[Dict] to List[BaseMessage] for Langchain
     langchain_history = []
-    for msg_data in history:
-        if msg_data["type"] == "user": # Assuming 'type' was 'user'/'ai' from load_chat_history for FastAPI
+    for msg_data in history: # history is List[Dict[str, Any]] from load_chat_history
+        if msg_data["type"] == "user":
             langchain_history.append(HumanMessage(content=msg_data["content"]))
-        elif msg_data["type"] == "ai":
+        elif msg_data["type"] == "ai": # Assuming 'ai' type from load_chat_history
             langchain_history.append(AIMessage(content=msg_data["content"]))
 
     try:
-        # Simple chat with history, no RAG tools here for this specific function.
-        # RAG is part of the main `run_market_intelligence_agent` workflow.
-        # This function could be enhanced to use a specific RAG chain if a VS is identified for session_id.
         if not os.getenv("GOOGLE_API_KEY"):
             error_logger.critical("GOOGLE_API_KEY not found for Chat (Gemini).")
             raise ValueError("GOOGLE_API_KEY is not set for chat.")
@@ -1142,14 +1090,6 @@ if __name__ == "__main__":
 
     logger.info(f"Agent CLI: Starting with Query='{parsed_cli_args.query}', Market='{parsed_cli_args.market}', Question='{parsed_cli_args.question or 'N/A'}'")
 
-    # Test chat function first
-    # test_chat_session_id = f"cli_chat_test_{uuid4()}"
-    # logger.info(f"Testing chat_with_agent with session ID: {test_chat_session_id}")
-    # first_resp = chat_with_agent("Hello from CLI!", test_chat_session_id, [])
-    # logger.info(f"CLI Chat Response 1: {first_resp}")
-    # second_resp = chat_with_agent("How does this work?", test_chat_session_id, load_chat_history(test_chat_session_id))
-    # logger.info(f"CLI Chat Response 2: {second_resp}")
-
     cli_run_output = run_market_intelligence_agent(
         query_str=parsed_cli_args.query,
         market_domain_str=parsed_cli_args.market,
@@ -1158,7 +1098,6 @@ if __name__ == "__main__":
 
     print("
 --- Agent CLI Run Summary ---")
-    # ... (rest of the __main__ block from user's Agent.py) ...
     print(f"Success: {cli_run_output.get('success')}")
     print(f"State ID: {cli_run_output.get('state_id')}")
     print(f"Report Directory (relative to /tmp or api_python/reports1): {cli_run_output.get('report_dir_relative')}")
@@ -1174,23 +1113,3 @@ To view results, check the 'reports1' directory (likely in '/tmp/reports1/' on V
     else:
         print("
 Agent run encountered errors. Please check logs ('market_intelligence.log', 'market_intelligence_errors.log') in the Python function's log (Vercel) or 'api_python/' directory (local) for details.")
-
-# Minor corrections integrated:
-# - Renamed variables to avoid shadowing (e.g., data, docs, chain, result, response, etc. within functions)
-# - Corrected LLM invokation for Gemini (gemini-pro, not gemini-2.0-flash which might not exist or be standard)
-# - Ensured API Key checks for LLMs used in nodes
-# - Added robust JSON parsing in llm_json_parser_robust
-# - Made report_dir handling more robust, especially for Vercel's /tmp directory.
-# - Ensured all file paths for reports, logs, VS are constructed carefully relative to a base path.
-# - Added a get_agent_base_reports_dir() helper for consistent report pathing.
-# - Added get_vector_store_path() helper.
-# - Clarified chat_with_agent for FastAPI vs. the main RAG workflow.
-# - Used `model_dump_json()` for Pydantic state saving and `MarketIntelligenceState(**json.loads(data))` for loading.
-# - Ensured `init_db()` is called on module load.
-# - Corrected `add_conditional_edges` to use `state_dict: dict` as input for the condition function.
-# - LangGraph `invoke` can take Pydantic model directly.
-# - `generate_report_charts` function defined and integrated.
-# - `verify_report_file` and `generate_readme` functions defined and integrated.
-# - Adjusted `run_market_intelligence_agent` response to include more structured paths.
-# - Refined `load_chat_history` to return List[Dict] that `main.py` expects.
-# - `chat_with_agent` function adapted to use this List[Dict] history and convert to Langchain messages.File `api_python/agent_logic.py` overwritten successfully.
