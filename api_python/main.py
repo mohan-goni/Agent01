@@ -4,16 +4,15 @@ from typing import List, Dict, Any, Optional
 import logging
 import os
 
-# Attempt to import from agent_logic. Ensure PYTHONPATH is correct for Vercel or local.
-# Vercel should handle this if agent_logic.py is in the same directory.
-try:
-    from agent_logic import chat_with_agent, load_chat_history, init_db as init_agent_db, run_market_intelligence_agent
-    # Assuming agent_logic.py uses its own logger internally now.
-except ImportError:
-    # Fallback for local dev if PYTHONPATH isn't set, assuming it's in the same dir
-    import sys
-    sys.path.append(os.path.dirname(__file__))
-    from agent_logic import chat_with_agent, load_chat_history, init_db as init_agent_db, run_market_intelligence_agent
+from agent_logic import (
+    chat_with_agent,
+    load_chat_history,
+    init_db as init_agent_db, # Keep alias if used consistently
+    run_market_intelligence_agent
+)
+# Assuming agent_logic.py uses its own logger internally now.
+# Vercel's build process should handle placing agent_logic.py where it can be imported directly.
+# The PYTHONPATH in vercel.json might also assist if needed, but direct import is cleaner.
 
 
 # Pydantic models for request and response
