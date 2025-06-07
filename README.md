@@ -9,7 +9,9 @@ The Market Intelligence Platform is an AI-powered dashboard designed to provide 
 *   **Frontend Framework:** Next.js (App Router)
 *   **Backend API (Agent):** Python with FastAPI
 *   **Language:** TypeScript (Frontend), Python (Backend)
-*   **ORM:** Drizzle ORM (for Next.js backend interactions with PostgreSQL)
+*   **ORM:**
+    *   Drizzle ORM (Primary for Next.js application data and schema migrations)
+    *   Prisma ORM (Client generation for `better-auth` compatibility)
 *   **Database:** PostgreSQL (for main application data), SQLite (for Python agent's internal state/cache)
 *   **Authentication:** Better Auth (with Google OAuth and Email/Password)
 *   **UI Components:** ShadCN UI
@@ -51,13 +53,21 @@ cd <repository-name>
     *   Open `.env.local` and fill in the required values as described in `.env.example`. This includes `DATABASE_URL` for PostgreSQL, Google OAuth credentials, `AUTH_SECRET`, `AUTH_URL`, and optionally `PYTHON_AGENT_API_BASE_URL` for specific local development setups.
 
 *   **Database Setup & Migrations (PostgreSQL):**
-    *   Ensure your PostgreSQL server is running and accessible via the `DATABASE_URL`.
+    *   Ensure your PostgreSQL server is running and accessible via the `DATABASE_URL`. This URL is used by both Drizzle ORM and Prisma (for `better-auth`).
     *   Create the database if it doesn't exist (e.g., `market_intel_db`).
-    *   Apply Drizzle migrations for the Next.js application's database:
+    *   **Apply Drizzle Migrations:** Drizzle ORM is used for all schema migrations, including tables for authentication.
         ```bash
         pnpm drizzle-kit migrate
         ```
-    *   If you modify `db/schema.ts`, generate new migrations: `pnpm drizzle-kit generate` then `pnpm drizzle-kit migrate`.
+    *   **Generate Prisma Client:** The `better-auth` library uses Prisma Client internally. After Drizzle has created/updated the database schema, you need to generate the Prisma Client.
+        ```bash
+        pnpm prisma generate
+        ```
+        *Note: Do NOT use `prisma migrate` or `prisma db push`. Drizzle is the source of truth for schema changes.*
+    *   **Making Schema Changes:** If you modify `db/schema.ts` (Drizzle schema):
+        1.  Generate a new Drizzle migration: `pnpm drizzle-kit generate`
+        2.  Apply the Drizzle migration: `pnpm drizzle-kit migrate`
+        3.  Re-generate the Prisma Client to reflect any changes to auth-related tables: `pnpm prisma generate`
 
 ### 3. Backend (Python FastAPI Agent) Setup (`api_python/`)
 
@@ -89,6 +99,7 @@ The Next.js application includes a "Load Sample Data" button on the dashboard. T
 
 ## Running the Application
 
+(Rest of the README remains the same as the previous version: Running the Application, Python Agent API Service, Key Features Implemented, Folder Structure, Linting and Formatting, Deployment Considerations)
 You have two main ways to run the full application (Next.js frontend + Python FastAPI backend) locally:
 
 *   **Recommended for Vercel-like experience: `vercel dev`**
