@@ -275,11 +275,8 @@ def fetch_url_content(url_to_fetch: str) -> Dict[str, Any]: # Renamed
 
         if doc_object:
             raw_page_content = doc_object.page_content # Renamed
-            cleaned_page_content = re.sub(r'
-\s*
-', '
-
-', raw_page_content).strip() # Renamed
+            # Corrected re.sub call to handle newlines properly
+            cleaned_page_content = re.sub(r'\n\s*\n', '\n\n', raw_page_content).strip()
             summary_text = cleaned_page_content[:1000] # Increased summary length
             document_title = doc_object.metadata.get("title", "") or os.path.basename(url_to_fetch) # Renamed
             if not document_title: document_title = "Untitled Document"
