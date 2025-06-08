@@ -2,6 +2,7 @@
 
 import type React from "react"
 import { useState } from "react"
+import { signUp } from "@/lib/auth-client"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -26,23 +27,19 @@ export default function SignupForm() {
     setLoading(true)
 
     try {
-      const response = await fetch("/api/auth/sign-up", { // better-auth endpoint for signup
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
-      })
+      const { error: apiError, user } = await signUp("email", { email, password })
 
-      if (response.ok) {
+      if (apiError) {
+        setError(apiError)
+      } else if (user) {
         // Redirect to a page that tells the user to check their email for verification,
         // or directly to login / dashboard if email verification is not strictly enforced before first login.
-        // For now, redirecting to login.
+        // For now, redirecting to login with a success message.
         window.location.href = "/auth/login?message=Signup+successful.+Please+login."
-      } else {
-        const data = await response.json()
-        setError(data.error || "Signup failed. Please try again.")
       }
     } catch (err) {
-      console.error("Signup error:", err)
+      // Catch any unexpected errors from signUp itself
+      console.error("Unexpected signup function error:", err)
       setError("An unexpected error occurred. Please try again.")
     } finally {
       setLoading(false)
