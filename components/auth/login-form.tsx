@@ -3,6 +3,7 @@
 import type React from "react"
 
 import { useState } from "react"
+import { signIn } from "@/lib/auth-client"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -19,17 +20,17 @@ export default function LoginForm() {
     setLoading(true)
 
     try {
-      const response = await fetch("/api/auth/sign-in", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
-      })
+      const { error, session } = await signIn("email", { email, password })
 
-      if (response.ok) {
+      if (error) {
+        console.error("Login error:", error)
+        // TODO: Display error to user
+      } else if (session) {
         window.location.href = "/dashboard"
       }
-    } catch (error) {
-      console.error("Login error:", error)
+    } catch (err) {
+      // Catch any unexpected errors from signIn itself, though better-auth aims to return them in `error`
+      console.error("Unexpected login function error:", err)
     } finally {
       setLoading(false)
     }

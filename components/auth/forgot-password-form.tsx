@@ -2,6 +2,7 @@
 
 import type React from "react"
 import { useState } from "react"
+import { sendPasswordResetEmail } from "@/lib/auth-client"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -21,24 +22,17 @@ export default function ForgotPasswordForm() {
     setLoading(true)
 
     try {
-      // Assuming better-auth has an endpoint like this for initiating password reset
-      const response = await fetch("/api/auth/reset-password", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email }),
-      })
-
-      if (response.ok) {
-        setMessage("If an account exists for this email, a password reset link has been sent.")
+      const result = await sendPasswordResetEmail({ email });
+      if (result.error) {
+        setError(result.error);
       } else {
-        const data = await response.json()
-        setError(data.error || "Failed to send reset link. Please try again.")
+        setMessage("If an account with that email exists, a password reset link has been sent.");
       }
     } catch (err) {
-      console.error("Forgot password error:", err)
-      setError("An unexpected error occurred. Please try again.")
+      setError("An unexpected error occurred.");
+      console.error("Forgot password error:", err);
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
   }
 
