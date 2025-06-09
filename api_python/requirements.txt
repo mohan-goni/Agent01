@@ -24,6 +24,7 @@ cachetools # For TTLCache
 
 # Google specific (if not covered by langchain-google-genai for all needs)
 google-generativeai # Explicitly listed, might be used by init_chat_model or directly
+google-search-results # For SerpAPI
 
 # Notes:
 # - Ensure API keys (TAVILY_API_KEY, GOOGLE_API_KEY) are set in the Vercel environment for the Python function.

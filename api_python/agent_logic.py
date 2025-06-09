@@ -26,6 +26,41 @@ from cachetools import TTLCache
 import traceback
 import argparse # For CLI execution in __main__
 
+try:
+    from serpapi import GoogleSearch
+except ImportError:
+    logger.warning("SerpAPI library (google-search-results) not installed. SerpAPI functionality will be disabled.")
+    GoogleSearch = None # Define it as None so later checks can be made
+
+try:
+    from gnewsclient import GNewsClient
+except ImportError:
+    logger.warning("GNewsClient library (gnewsclient) not installed. GNews direct fetch functionality will be disabled.")
+    GNewsClient = None
+
+try:
+    from newsapi import NewsApiClient
+except ImportError:
+    logger.warning("NewsAPI library (newsapi-python) not installed. NewsAPI direct fetch functionality will be disabled.")
+    NewsApiClient = None
+
+try:
+    # Assuming the FMP SDK provides functions directly, e.g., under 'fmpsdk.company_valuation'
+    # This is a placeholder import structure; actual may vary.
+    import fmpsdk
+    logger.info("fmpsdk imported successfully (actual functions might be fmpsdk.historical_price_full, fmpsdk.company_profile etc.)")
+except ImportError:
+    logger.warning("FMP SDK (fmpsdk) not installed. Financial Modeling Prep functionality will be disabled.")
+    fmpsdk = None
+
+try:
+    from alpha_vantage.timeseries import TimeSeries
+    from alpha_vantage.fundamentaldata import FundamentalData
+except ImportError:
+    logger.warning("Alpha Vantage library (alpha_vantage) not installed. Alpha Vantage functionality will be disabled.")
+    TimeSeries = None
+    FundamentalData = None
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -72,6 +107,23 @@ load_dotenv() # Load .env file into environment variables
 
 search_results_cache = TTLCache(maxsize=100, ttl=3600) # Renamed for clarity
 
+# TODO: Implement database lookup for user-specific API keys when user context is available.
+def get_api_key(service_name: str, user_id: Optional[str] = None) -> Optional[str]:
+    """
+    Retrieves an API key for a given service from environment variables.
+    Future: Extend to fetch user-specific keys from a database.
+    """
+    logger.debug(f"Attempting to retrieve API key for service: {service_name}, UserID: {user_id if user_id else 'N/A (system-wide)'}")
+    env_var_name = f"{service_name.upper()}_API_KEY"
+    api_key = os.getenv(env_var_name)
+
+    if api_key:
+        logger.info(f"API key found in environment for service: {service_name}")
+        return api_key
+    else:
+        logger.warning(f"API key NOT SET for service: {service_name} (looked for {env_var_name})")
+        return None
+
 def init_db():
     db_name = 'market_intelligence_agent.db' # Specific DB name
     db_path = "" # Initialize to ensure it's in scope for logging
@@ -117,6 +169,7 @@ init_db() # Call on module load
 class MarketIntelligenceState(BaseModel):
     raw_news_data: List[Dict[str, Any]] = Field(default_factory=list)
     competitor_data: List[Dict[str, Any]] = Field(default_factory=list)
+    financial_data: List[Dict] = Field(default_factory=list)
     market_trends: List[Dict[str, Any]] = Field(default_factory=list)
     opportunities: List[Dict[str, Any]] = Field(default_factory=list)
     strategic_recommendations: List[Dict[str, Any]] = Field(default_factory=list)
@@ -229,10 +282,10 @@ def search_with_tavily(search_query: str) -> List[str]: # Renamed
         logger.info(f"Tavily Search: Cache hit for query: '{search_query}'")
         return search_results_cache[normalized_cache_key]
 
-    tavily_api_key_val = os.getenv("TAVILY_API_KEY") # Renamed
+    tavily_api_key_val = get_api_key("TAVILY")
     if not tavily_api_key_val:
-        error_logger.critical("TAVILY_API_KEY not found in environment variables.")
-        raise ValueError("TAVILY_API_KEY is not set. Please ensure it's in your .env file or environment.")
+        error_logger.critical("TAVILY_API_KEY not found.")
+        raise ValueError("TAVILY_API_KEY is not set. Please ensure it's in your .env file or environment and accessible via get_api_key.")
 
     try:
         logger.info(f"Tavily Search: Performing API search for query: '{search_query}'")
@@ -256,6 +309,289 @@ def search_with_tavily(search_query: str) -> List[str]: # Renamed
     except Exception as e_tavily_other: # Renamed
         error_logger.error(f"Unexpected error during Tavily search for query '{search_query}': {e_tavily_other}")
         raise
+
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=8))
+def search_with_serpapi(search_query: str) -> List[str]:
+    if GoogleSearch is None:
+        logger.warning("SerpAPI search called but library not available.")
+        return []
+
+    normalized_cache_key = f"serpapi_search_{search_query.lower().replace(' ', '_')}"
+    if normalized_cache_key in search_results_cache:
+        logger.info(f"SerpAPI Search: Cache hit for query: '{search_query}'")
+        return search_results_cache[normalized_cache_key]
+
+    api_key = get_api_key("SERPAPI")
+    if not api_key:
+        error_logger.warning("SERPAPI_API_KEY not found or not set. Skipping SerpAPI search.")
+        return []
+
+    params = {
+        "q": search_query,
+        "api_key": api_key,
+        "engine": "google",
+        "num": 10  # Get up to 10 results
+    }
+
+    try:
+        logger.info(f"SerpAPI Search: Performing API search for query: '{search_query}'")
+        search = GoogleSearch(params)
+        results = search.get_dict()
+
+        extracted_urls = []
+        if "organic_results" in results:
+            for r in results["organic_results"]:
+                if "link" in r:
+                    extracted_urls.append(r["link"])
+
+        search_results_cache[normalized_cache_key] = extracted_urls
+        logger.info(f"SerpAPI Search: Retrieved {len(extracted_urls)} URLs for query: '{search_query}'")
+        return extracted_urls
+    except requests.exceptions.RequestException as e_serpapi_req:
+        error_logger.error(f"SerpAPI Search API request failed for query '{search_query}': {e_serpapi_req}")
+        return [] # Return empty list on request error
+    except Exception as e_serpapi_other:
+        error_logger.error(f"Unexpected error during SerpAPI search for query '{search_query}': {e_serpapi_other}
+{traceback.format_exc()}")
+        return [] # Return empty list on other errors
+
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=8))
+def fetch_from_gnews_direct(query: str) -> List[Dict[str, Any]]:
+    if GNewsClient is None:
+        logger.warning("GNewsClient search called but library not available.")
+        return []
+
+    cache_key = f"gnews_direct_search_{query.lower().replace(' ', '_')}"
+    if cache_key in search_results_cache:
+        logger.info(f"GNews Direct: Cache hit for query: '{query}'")
+        return search_results_cache[cache_key]
+
+    api_key = get_api_key("GNEWS")
+    if not api_key:
+        logger.warning("GNEWS_API_KEY not found or not set. Skipping GNews direct search.")
+        return []
+
+    transformed_articles = []
+    try:
+        logger.info(f"GNews Direct: Performing API search for query: '{query}'")
+        client = GNewsClient(api_key=api_key)
+        client.query = query
+        client.language = 'english' # Corrected attribute
+        client.max_results = 10     # Corrected attribute
+
+        articles_raw = client.get_news()
+
+        for article in articles_raw:
+            transformed_articles.append({
+                "source": "GNews - " + article.get('source', {}).get('name', 'Unknown'),
+                "title": article.get('title'),
+                "summary": article.get('description'),
+                "full_content": article.get('content', article.get('description')),
+                "url": article.get('url'),
+                "publishedAt": article.get('published date')
+            })
+
+        search_results_cache[cache_key] = transformed_articles
+        logger.info(f"GNews Direct: Retrieved {len(transformed_articles)} articles for query: '{query}'")
+        return transformed_articles
+    except Exception as e_gnews:
+        error_logger.error(f"GNews Direct search failed for query '{query}': {e_gnews}
+{traceback.format_exc()}")
+        return []
+
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=8))
+def fetch_from_newsapi_direct(query: str) -> List[Dict[str, Any]]:
+    if NewsApiClient is None:
+        logger.warning("NewsAPI search called but library not available.")
+        return []
+
+    cache_key = f"newsapi_direct_search_{query.lower().replace(' ', '_')}"
+    if cache_key in search_results_cache:
+        logger.info(f"NewsAPI Direct: Cache hit for query: '{query}'")
+        return search_results_cache[cache_key]
+
+    api_key = get_api_key("NEWS_API") # Ensure this matches your env variable name, e.g., NEWS_API_API_KEY
+    if not api_key:
+        logger.warning("NEWS_API_KEY not found or not set. Skipping NewsAPI direct search.")
+        return []
+
+    transformed_articles = []
+    try:
+        logger.info(f"NewsAPI Direct: Performing API search for query: '{query}'")
+        newsapi = NewsApiClient(api_key=api_key)
+        all_articles_raw = newsapi.get_everything(q=query, language='en', sort_by='relevancy', page_size=10)
+
+        for article in all_articles_raw.get('articles', []):
+            transformed_articles.append({
+                "source": "NewsAPI - " + article.get('source', {}).get('name', 'Unknown'),
+                "title": article.get('title'),
+                "summary": article.get('description'),
+                "full_content": article.get('content', article.get('description')),
+                "url": article.get('url'),
+                "publishedAt": article.get('publishedAt')
+            })
+
+        search_results_cache[cache_key] = transformed_articles
+        logger.info(f"NewsAPI Direct: Retrieved {len(transformed_articles)} articles for query: '{query}'")
+        return transformed_articles
+    except Exception as e_newsapi:
+        error_logger.error(f"NewsAPI Direct search failed for query '{query}': {e_newsapi}
+{traceback.format_exc()}")
+        return []
+
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=8))
+def fetch_from_mediastack_direct(query: str) -> List[Dict[str, Any]]:
+    cache_key = f"mediastack_direct_search_{query.lower().replace(' ', '_')}"
+    if cache_key in search_results_cache:
+        logger.info(f"MediaStack Direct: Cache hit for query: '{query}'")
+        return search_results_cache[cache_key]
+
+    api_key = get_api_key("MEDIASTACK") # Ensure this matches, e.g., MEDIASTACK_API_KEY
+    if not api_key:
+        logger.warning("MEDIASTACK_API_KEY not found or not set. Skipping MediaStack direct search.")
+        return []
+
+    endpoint = "http://api.mediastack.com/v1/news"
+    params = {'access_key': api_key, 'keywords': query, 'limit': 10, 'languages': 'en'}
+    transformed_articles = []
+
+    try:
+        logger.info(f"MediaStack Direct: Performing API search for query: '{query}'")
+        response = requests.get(endpoint, params=params)
+        response.raise_for_status() # Will raise an HTTPError for bad responses (4XX or 5XX)
+        data = response.json()
+
+        for article in data.get('data', []):
+            transformed_articles.append({
+                "source": "MediaStack - " + article.get('source', 'Unknown'),
+                "title": article.get('title'),
+                "summary": article.get('description'),
+                "full_content": article.get('description'), # MediaStack often only has description
+                "url": article.get('url'),
+                "publishedAt": article.get('published_at')
+            })
+
+        search_results_cache[cache_key] = transformed_articles
+        logger.info(f"MediaStack Direct: Retrieved {len(transformed_articles)} articles for query: '{query}'")
+        return transformed_articles
+    except requests.exceptions.RequestException as e_mediastack_req:
+        error_logger.error(f"MediaStack Direct API request failed for query '{query}': {e_mediastack_req}")
+        return []
+    except Exception as e_mediastack_other:
+        error_logger.error(f"Unexpected error during MediaStack Direct search for query '{query}': {e_mediastack_other}
+{traceback.format_exc()}")
+        return []
+
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=8))
+def fetch_financial_data_fmp(query: str) -> List[Dict[str, Any]]:
+    if fmpsdk is None:
+        logger.warning("FMP SDK called but library not available.")
+        return []
+
+    cache_key = f"fmp_data_{query.lower().replace(' ', '_')}"
+    if cache_key in search_results_cache:
+        logger.info(f"FMP: Cache hit for query: '{query}'")
+        return search_results_cache[cache_key]
+
+    api_key = get_api_key("FINANCIAL_MODELING_PREP")
+    if not api_key:
+        logger.warning("FINANCIAL_MODELING_PREP_API_KEY not found or not set. Skipping FMP data fetch.")
+        return []
+
+    potential_symbols = re.findall(r'\b([A-Z]{1,5})\b', query)
+    symbol_to_use = potential_symbols[0] if potential_symbols else "AAPL"
+    logger.info(f"FMP: Using symbol '{symbol_to_use}' based on query '{query}'.")
+
+    fetched_fmp_data = []
+    try:
+        # Placeholder for actual FMP SDK calls
+        # profile = fmpsdk.company_profile(apikey=api_key, symbol=symbol_to_use)
+        # quote = fmpsdk.quote(apikey=api_key, symbol=symbol_to_use)
+
+        # Simulated data as actual SDK functions are not known here
+        profile_data = {"symbol": symbol_to_use, "companyName": f"Example {symbol_to_use} Inc. (FMP)", "price": 150.0, "industry": "Technology"}
+        if profile_data:
+            fetched_fmp_data.append({
+                "source": "FinancialModelingPrep",
+                "type": "company_profile",
+                "symbol": symbol_to_use,
+                "data": profile_data
+            })
+
+        quote_data = {"symbol": symbol_to_use, "price": 150.0, "change": 1.5, "volume": 1000000}
+        if quote_data:
+            fetched_fmp_data.append({
+                "source": "FinancialModelingPrep",
+                "type": "stock_quote",
+                "symbol": symbol_to_use,
+                "data": quote_data
+            })
+        logger.info(f"FMP: Fetched (simulated) {len(fetched_fmp_data)} data points for symbol {symbol_to_use}.")
+    except Exception as e:
+        error_logger.error(f"FMP data fetching failed for symbol {symbol_to_use}: {e}
+{traceback.format_exc()}")
+        return []
+
+    search_results_cache[cache_key] = fetched_fmp_data
+    return fetched_fmp_data
+
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=8))
+def fetch_financial_data_alphavantage(query: str) -> List[Dict[str, Any]]:
+    if TimeSeries is None or FundamentalData is None:
+        logger.warning("Alpha Vantage library called but not fully available.")
+        return []
+
+    cache_key = f"alphavantage_data_{query.lower().replace(' ', '_')}"
+    if cache_key in search_results_cache:
+        logger.info(f"AlphaVantage: Cache hit for query: '{query}'")
+        return search_results_cache[cache_key]
+
+    api_key = get_api_key("ALPHA_VANTAGE")
+    if not api_key:
+        logger.warning("ALPHA_VANTAGE_API_KEY not found or not set. Skipping Alpha Vantage data fetch.")
+        return []
+
+    potential_symbols = re.findall(r'\b([A-Z]{1,5})\b', query)
+    symbol_to_use = potential_symbols[0] if potential_symbols else "IBM"
+    logger.info(f"AlphaVantage: Using symbol '{symbol_to_use}' based on query '{query}'.")
+
+    fetched_av_data = []
+    try:
+        if TimeSeries:
+            ts = TimeSeries(key=api_key, output_format='json')
+            data_ts, meta_data_ts = ts.get_daily(symbol=symbol_to_use, outputsize='compact')
+            if data_ts:
+                latest_date = sorted(data_ts.keys(), reverse=True)[0]
+                latest_data_point = data_ts[latest_date]
+                fetched_av_data.append({
+                    "source": "AlphaVantage",
+                    "type": "daily_time_series_latest",
+                    "symbol": symbol_to_use,
+                    "data": {"date": latest_date, **latest_data_point}
+                })
+
+        if FundamentalData:
+            fd = FundamentalData(key=api_key, output_format='json')
+            try:
+                data_overview, _ = fd.get_company_overview(symbol=symbol_to_use)
+                if data_overview:
+                    fetched_av_data.append({
+                        "source": "AlphaVantage",
+                        "type": "company_overview",
+                        "symbol": symbol_to_use,
+                        "data": data_overview
+                    })
+            except Exception as e_overview:
+                 logger.warning(f"AlphaVantage: Could not fetch company overview for {symbol_to_use}: {e_overview}")
+
+        logger.info(f"AlphaVantage: Fetched {len(fetched_av_data)} data points for symbol {symbol_to_use}.")
+    except Exception as e:
+        error_logger.error(f"AlphaVantage data fetching failed for symbol {symbol_to_use}: {e}
+{traceback.format_exc()}")
+        return []
+
+    search_results_cache[cache_key] = fetched_av_data
+    return fetched_av_data
 
 def fetch_url_content(url_to_fetch: str) -> Dict[str, Any]: # Renamed
     try:
@@ -322,20 +658,131 @@ def market_data_collector(current_state: MarketIntelligenceState) -> Dict[str, A
         news_search_query = f"{current_state.query} {current_state.market_domain} news trends developments emerging technologies" # More specific
         competitor_search_query = f"{current_state.query} {current_state.market_domain} competitor landscape key players market share" # More specific
 
-        news_urls_list = search_with_tavily(news_search_query) # Renamed
-        competitor_urls_list = search_with_tavily(competitor_search_query) # Renamed
-    except Exception as e_search: # Renamed
-        error_logger.error(f"Market Data Collector: Tavily search phase failed: {e_search}")
+        news_urls_list = []
+        competitor_urls_list = []
+        serpapi_news_urls_list = []
+        serpapi_competitor_urls_list = []
+
+        try:
+            logger.info("Attempting Tavily search for news URLs...")
+            news_urls_list = search_with_tavily(news_search_query)
+            logger.info(f"Tavily news search returned {len(news_urls_list)} URLs.")
+        except Exception as e_tavily_news:
+            error_logger.error(f"Tavily news search failed: {e_tavily_news}")
+
+        try:
+            logger.info("Attempting Tavily search for competitor URLs...")
+            competitor_urls_list = search_with_tavily(competitor_search_query)
+            logger.info(f"Tavily competitor search returned {len(competitor_urls_list)} URLs.")
+        except Exception as e_tavily_comp:
+            error_logger.error(f"Tavily competitor search failed: {e_tavily_comp}")
+
+        if GoogleSearch is not None: # Only attempt if library was imported
+            try:
+                logger.info("Attempting SerpAPI search for news URLs...")
+                serpapi_news_urls_list = search_with_serpapi(news_search_query)
+                logger.info(f"SerpAPI news search returned {len(serpapi_news_urls_list)} URLs.")
+            except Exception as e_serp_news:
+                error_logger.error(f"SerpAPI news search failed: {e_serp_news}")
+
+            try:
+                logger.info("Attempting SerpAPI search for competitor URLs...")
+                serpapi_competitor_urls_list = search_with_serpapi(competitor_search_query)
+                logger.info(f"SerpAPI competitor search returned {len(serpapi_competitor_urls_list)} URLs.")
+            except Exception as e_serp_comp:
+                error_logger.error(f"SerpAPI competitor search failed: {e_serp_comp}")
+        else:
+            logger.info("SerpAPI library not available, skipping SerpAPI searches.")
+
+    except Exception as e_search: # Renamed general search error
+        error_logger.error(f"Market Data Collector: Search phase failed catastrophically: {e_search}")
+        # If even Tavily fails and raises, this ensures data is empty before returning
         current_state.raw_news_data, current_state.competitor_data = [], []
         save_state(current_state)
         return current_state.model_dump()
 
-    combined_unique_urls = list(set(news_urls_list + competitor_urls_list)) # Renamed
-    logger.info(f"Market Data Collector: Total unique URLs to process: {len(combined_unique_urls)}")
+    combined_unique_urls = list(set(news_urls_list + competitor_urls_list + serpapi_news_urls_list + serpapi_competitor_urls_list)) # Renamed
+    logger.info(f"Market Data Collector: Tavily URLs (News: {len(news_urls_list)}, Competitor: {len(competitor_urls_list)}). SerpAPI URLs (News: {len(serpapi_news_urls_list)}, Competitor: {len(serpapi_competitor_urls_list)}). Total unique URLs to process: {len(combined_unique_urls)}")
 
     all_fetched_data = [] # Renamed
+
+    # Add directly fetched articles first
+    direct_articles = []
+    current_query_or_domain = current_state.query if current_state.query else current_state.market_domain
+
+    # GNews
+    if GNewsClient is not None:
+        try:
+            logger.info(f"Fetching directly from GNews for query: '{current_query_or_domain}'")
+            gnews_articles = fetch_from_gnews_direct(current_query_or_domain)
+            direct_articles.extend(gnews_articles)
+            logger.info(f"Retrieved {len(gnews_articles)} articles directly from GNews.")
+        except Exception as e_gnews:
+            error_logger.error(f"Failed to fetch from GNews directly: {e_gnews}")
+    else:
+        logger.info("GNewsClient library not available, skipping GNews direct fetch.")
+
+    # NewsAPI
+    if NewsApiClient is not None:
+        try:
+            logger.info(f"Fetching directly from NewsAPI for query: '{current_query_or_domain}'")
+            newsapi_articles = fetch_from_newsapi_direct(current_query_or_domain)
+            direct_articles.extend(newsapi_articles)
+            logger.info(f"Retrieved {len(newsapi_articles)} articles directly from NewsAPI.")
+        except Exception as e_newsapi:
+            error_logger.error(f"Failed to fetch from NewsAPI directly: {e_newsapi}")
+    else:
+        logger.info("NewsAPI library not available, skipping NewsAPI direct fetch.")
+
+    # MediaStack
+    try:
+        logger.info(f"Fetching directly from MediaStack for query: '{current_query_or_domain}'")
+        mediastack_articles = fetch_from_mediastack_direct(current_query_or_domain)
+        direct_articles.extend(mediastack_articles)
+        logger.info(f"Retrieved {len(mediastack_articles)} articles directly from MediaStack.")
+    except Exception as e_mstack:
+        error_logger.error(f"Failed to fetch from MediaStack directly: {e_mstack}")
+
+    all_fetched_data.extend(direct_articles)
+    logger.info(f"Total articles after direct fetching: {len(all_fetched_data)}")
+
+    current_state.financial_data = [] # Initialize
+
+    # Financial Modeling Prep
+    if fmpsdk is not None:
+        try:
+            logger.info(f"Fetching financial data from FMP for query: '{current_query_or_domain}'")
+            fmp_fin_data = fetch_financial_data_fmp(current_query_or_domain)
+            current_state.financial_data.extend(fmp_fin_data)
+            logger.info(f"Retrieved {len(fmp_fin_data)} data items from FMP.")
+        except Exception as e_fmp_fin:
+            error_logger.error(f"Failed to fetch financial data from FMP: {e_fmp_fin}")
+    else:
+        logger.info("FMP SDK not available, skipping FMP financial data fetch.")
+
+    # Alpha Vantage
+    if TimeSeries is not None and FundamentalData is not None: # Check if AV libs loaded
+        try:
+            logger.info(f"Fetching financial data from Alpha Vantage for query: '{current_query_or_domain}'")
+            av_fin_data = fetch_financial_data_alphavantage(current_query_or_domain)
+            current_state.financial_data.extend(av_fin_data)
+            logger.info(f"Retrieved {len(av_fin_data)} data items from Alpha Vantage.")
+        except Exception as e_av_fin:
+            error_logger.error(f"Failed to fetch financial data from Alpha Vantage: {e_av_fin}")
+    else:
+        logger.info("Alpha Vantage library not available, skipping Alpha Vantage financial data fetch.")
+
+    logger.info(f"Total financial data items collected: {len(current_state.financial_data)}")
+
+    # Then process URLs from general search providers (Tavily, SerpAPI)
+    # This might re-fetch if URLs overlap, but fetch_url_content is usually generic
+    # A more advanced deduplication could happen here if needed, e.g., by URL.
     for idx, loop_url in enumerate(combined_unique_urls): # Renamed
-        logger.info(f"Market Data Collector: Processing URL {idx + 1}/{len(combined_unique_urls)}: {loop_url}")
+        # Simple check to avoid re-fetching if URL already processed via direct APIs
+        if any(article.get("url") == loop_url for article in direct_articles):
+            logger.info(f"Market Data Collector: Skipping URL {loop_url} as it might have been fetched directly.")
+            continue
+        logger.info(f"Market Data Collector: Processing URL {idx + 1}/{len(combined_unique_urls)} from web search: {loop_url}")
         content_data = fetch_url_content(loop_url) # Renamed
         all_fetched_data.append(content_data)
 
