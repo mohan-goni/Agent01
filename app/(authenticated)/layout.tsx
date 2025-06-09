@@ -14,7 +14,7 @@ import { Home, BarChart2, TrendingUp, Users, Settings, Download, MessageSquare, 
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 
-import { auth } from "@/lib/auth"; // For session management
+import { getCurrentUser } from "@/lib/auth"; // Using Supabase auth
 import { redirect } from "next/navigation"; // For redirecting
 
 // Placeholder for a logo component if you have one
@@ -25,11 +25,21 @@ export default async function AuthenticatedLayout({ // Made component async
 }: {
   children: React.ReactNode;
 }) {
-  const session = await auth(); // Get session (server-side)
+  const user = await getCurrentUser(); // Get user from Supabase
 
-  if (!session?.user) {
+  if (!user) {
     redirect("/auth/login?message=Please+login+to+access+this+page."); // Redirect if not logged in
   }
+
+  // The old mock session was:
+  // const session = {
+  //   user: {
+  //     id: "mock-user-id",
+  //     email: "user@example.com",
+  //   },
+  //   expires: new Date(Date.now() + 3600 * 1000).toISOString(),
+  // };
+  // We now use the `user` object directly from Supabase.
 
   return (
     <SidebarProvider defaultOpen={true}>
@@ -117,11 +127,11 @@ export default async function AuthenticatedLayout({ // Made component async
               <Button variant="ghost" size="icon" aria-label="Notifications">
                 <Bell className="h-5 w-5 text-gray-600 dark:text-gray-300" />
               </Button>
-              {session.user ? (
+              {user ? ( // Check for user object
                 <div className="flex items-center gap-2">
                   <UserCircle className="h-7 w-7 text-gray-600 dark:text-gray-300" />
                   <span className="text-sm text-gray-700 dark:text-gray-200 hidden md:inline">
-                    {session.user.email}
+                    {user.email} {/* Display user's email */}
                   </span>
                   {/* Future: Replace with a DropdownMenu for user actions (profile, settings, sign out) */}
                 </div>
