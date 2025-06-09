@@ -1,12 +1,14 @@
-import { neon } from '@neondatabase/serverless';
-import { drizzle } from 'drizzle-orm/neon-http';
-import { eq, desc, count } from 'drizzle-orm'; // Added count
-import * as schema from '../db/schema'; // Adjusted path assuming lib is at root
+import { drizzle } from 'drizzle-orm/postgres-js';
+import postgres from 'postgres';
+import { eq, desc, count } from 'drizzle-orm';
+import * as schema from '../db/schema';
 
-const sql = neon(process.env.DATABASE_URL!);
-const db = drizzle(sql, { schema });
+// Create the connection
+const connectionString = process.env.DATABASE_URL!;
+const client = postgres(connectionString);
+const db = drizzle(client, { schema });
 
-export { db, sql }; // Exporting db instance and sql for potential direct use if needed
+export { db, client }; // Exporting db instance and client for potential direct use if needed
 
 export async function getUserProfile(userId: string) {
   const result = await db.select()

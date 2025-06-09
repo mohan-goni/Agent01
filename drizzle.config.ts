@@ -7,7 +7,7 @@ export default {
   out: './db/migrations',
   dialect: 'postgresql', // Specify 'postgresql'
   dbCredentials: {
-    url: process.env.DATABASE_URL!, // Ensure this is the Neon connection string
+    url: process.env.DATABASE_URL!, // Ensure this is the Supabase connection string
   },
   verbose: true,
   strict: true,
