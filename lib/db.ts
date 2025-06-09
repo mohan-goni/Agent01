@@ -211,6 +211,40 @@ export async function getUserSavedArticles(userId: string) {
 // - api_keys
 // For now, focusing on refactoring existing functions.
 
+export async function saveMarketInsight(
+  title: string,
+  content: string,
+  insightType: string = "daily", // Default value for insightType
+  confidenceScore: number = 0.85 // Default value for confidenceScore
+) {
+  const result = await db.insert(schema.marketInsights)
+    .values({
+      title,
+      content,
+      insightType,
+      confidenceScore: String(confidenceScore), // Assuming schema might expect string for decimal
+      // createdAt will be set by default by the DB
+    })
+    .returning();
+  return result[0];
+}
+
+export async function getAllUsers() {
+  // This function will replace the one from lib/database.ts that queried neon_auth.users_sync.
+  // It should now query the userProfiles table (or users table if that's the final name).
+  // Assuming userProfiles is the correct table as per other functions in this file.
+  const result = await db.select({
+    id: schema.userProfiles.userId, // Assuming userId is the primary identifier
+    email: schema.userProfiles.email,
+    name: schema.userProfiles.name,
+    createdAt: schema.userProfiles.createdAt,
+    // Add any other fields that were previously returned by getAllUsers from neon_auth.users_sync if needed.
+  })
+  .from(schema.userProfiles)
+  .orderBy(desc(schema.userProfiles.createdAt));
+  return result;
+}
+
 export async function saveUserArticle(userId: string, articleId: number) {
   const result = await db.insert(schema.userSavedArticles)
     .values({ userId, articleId })

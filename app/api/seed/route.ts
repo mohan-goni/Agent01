@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server"
-import { saveArticle } from "@/lib/db" // Updated import path from @/lib/database to @/lib/db
-// import { saveMarketInsight } from "@/lib/database" // saveMarketInsight is not yet in lib/db.ts
+import { saveArticle, saveMarketInsight } from "@/lib/db"
 
 // For now, we'll focus on articles as per the subtask.
 // If saveMarketInsight is needed and is part of lib/db.ts, ensure it's imported correctly.
@@ -111,7 +110,7 @@ export async function POST() {
 
     // Seed market insights - Commenting out as saveMarketInsight is not in lib/db.ts yet
     // and this subtask focuses on articles.
-    /*
+
     const sampleInsight = `
 Market Analysis Summary - ${new Date().toLocaleDateString()}
 
@@ -138,16 +137,15 @@ Risk Factors:
 • Regulatory changes in key sectors
     `
 
-    // const savedInsight = await saveMarketInsight("Daily Market Intelligence Report", sampleInsight, "daily", 0.87)
-    const savedInsight = null; // Placeholder
-    */
+    const savedInsight = await saveMarketInsight("Daily Market Intelligence Report", sampleInsight, "daily", 0.87)
+
 
     return NextResponse.json({
       success: true,
       message: "Sample articles seeded successfully", // Updated message
       data: {
         articles: savedArticles.length,
-        // insights: savedInsight ? 1 : 0, // Commented out insight part
+        insights: savedInsight ? 1 : 0,
       },
     })
   } catch (error) {

@@ -1,6 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { AIService } from "@/lib/ai-service"
-import { getArticles, saveMarketInsight, getMarketInsights } from "@/lib/database"
+import { getArticles, saveMarketInsight, getInsights } from "@/lib/db"
 
 const aiService = new AIService()
 
@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
       })
     } else {
       // Get existing insights from database
-      const insights = await getMarketInsights(5)
+      const insights = await getInsights(5)
 
       return NextResponse.json({
         success: true,

@@ -1,6 +1,8 @@
 import type { Config } from 'drizzle-kit';
-import * as dotenv from 'dotenv';
-dotenv.config({ path: '.env.local' }); // Load .env.local for local development
+
+// dotenv.config({ path: '.env.local' }); // Load .env.local for local development
+// Assuming DATABASE_URL will be provided by the environment if needed,
+// or drizzle-kit generate can work without it for schema parsing.
 
 export default {
   schema: './db/schema.ts',
