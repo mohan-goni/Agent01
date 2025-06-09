@@ -15,13 +15,14 @@ from agent_logic import (
 
 # Environment variable configuration
 class Settings(BaseSettings):
-    google_api_key: str
-    tavily_api_key: str
-    serpapi_api_key: str
-    gnews_api_key: str
-    newsapi_api_key: str
-    fmp_api_key: str
-    alpha_vantage_api_key: str
+    GOOGLE_API_KEY: str
+    TAVILY_API_KEY: str
+    SERPAPI_API_KEY: str
+    GNEWS_API_KEY: str
+    NEWS_API_KEY: str
+    FINANCIAL_MODELING_PREP_API_KEY: str # Changed from fmp_api_key
+    ALPHA_VANTAGE_API_KEY: str
+    MEDIASTACK_API_KEY: str # Added
 
     class Config:
         env_file = ".env"
@@ -127,12 +128,18 @@ async def handle_chat(request: ChatRequest):
             logger.error("Agent returned empty response", session_id=request.session_id)
             raise HTTPException(status_code=500, detail="Agent failed to produce a response")
         logger.info("Chat processed", session_id=request.session_id)
+        if agent_response_text == "Sorry, I encountered an error while processing your message.":
+            # This specific string is returned by chat_with_agent on internal errors
+            raise HTTPException(status_code=503, detail=agent_response_text)
         return ChatResponse(
             response_text=agent_response_text,
             session_id=request.session_id
         )
     except HTTPException as he:
         raise he
+    except ValueError as ve: # Catch specific ValueErrors, e.g. API key not set
+        logger.error("Chat endpoint configuration error", session_id=request.session_id, exc_info=ve)
+        raise HTTPException(status_code=503, detail=f"Service configuration error: {str(ve)}")
     except Exception as e:
         logger.error("Chat endpoint error", session_id=request.session_id, exc_info=e)
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")

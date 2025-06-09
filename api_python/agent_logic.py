@@ -478,11 +478,11 @@ def fetch_financial_data_alphavantage(query: str) -> List[Dict[str, Any]]:
         error_logger.error(f"AlphaVantage data fetching failed for symbol {symbol_to_use}: {e}\n{traceback.format_exc()}")
         return []
 
-def fetch_url_content(url_to_fetch: str) -> Dict[str, Any]:
+async def fetch_url_content(url_to_fetch: str) -> Dict[str, Any]:
     try:
         logger.info(f"WebBaseLoader: Loading content from URL: {url_to_fetch}")
         loader = WebBaseLoader([url_to_fetch])
-        loaded_docs = loader.load()
+        loaded_docs = await loader.aload() # Use aload for async
         doc_object = loaded_docs[0] if loaded_docs else None
 
         if doc_object:
@@ -498,7 +498,7 @@ def fetch_url_content(url_to_fetch: str) -> Dict[str, Any]:
             logger.warning(f"WebBaseLoader: No document object returned from {url_to_fetch}")
             return {"source": url_to_fetch, "title": "Content Not Loaded", "summary": "", "full_content": "", "url": url_to_fetch}
     except Exception as e_fetch_url:
-        error_logger.error(f"WebBaseLoader: Failed to load content from URL '{url_to_fetch}': {e_fetch_url}")
+        error_logger.error(f"WebBaseLoader: Failed to load content from URL '{url_to_fetch}': {e_fetch_url}\n{traceback.format_exc()}")
         return {"source": url_to_fetch, "title": f"Failed to Load: {os.path.basename(url_to_fetch)}", "summary": str(e_fetch_url), "full_content": "", "url": url_to_fetch}
 
 def get_agent_base_reports_dir():
@@ -512,7 +512,7 @@ def get_agent_base_reports_dir():
     os.makedirs(base_reports_dir, exist_ok=True)
     return base_reports_dir
 
-def market_data_collector(current_state: MarketIntelligenceState) -> Dict[str, Any]:
+async def market_data_collector(current_state: MarketIntelligenceState) -> Dict[str, Any]:
     logger.info(f"Market Data Collector: Domain='{current_state.market_domain}', Query='{current_state.query or 'N/A'}'")
     ts_string = datetime.now().strftime("%Y%m%d_%H%M%S")
     query_prefix = re.sub(r'[^a-zA-Z0-9_-]', '_', (current_state.query or "general").lower().replace(' ', '_')[:20])
@@ -615,7 +615,7 @@ def market_data_collector(current_state: MarketIntelligenceState) -> Dict[str, A
             logger.info(f"Market Data Collector: Skipping URL {loop_url} as it was fetched directly.")
             continue
         logger.info(f"Market Data Collector: Processing URL {idx + 1}/{len(combined_unique_urls)}: {loop_url}")
-        content_data = fetch_url_content(loop_url)
+        content_data = await fetch_url_content(loop_url) # Await async call
         all_fetched_data.append(content_data)
 
     current_state.raw_news_data = all_fetched_data
@@ -675,7 +675,7 @@ def llm_json_parser_robust(llm_output_str: str, default_return_val: Any = None) 
         error_logger.warning(f"LLM JSON Parser: Parsing failed: {e_json_decode}. String attempted: '{json_str_to_parse[:500] if 'json_str_to_parse' in locals() else cleaned_llm_output[:500]}'")
         return default_return_val if default_return_val is not None else []
 
-def trend_analyzer(current_state: MarketIntelligenceState) -> Dict[str, Any]:
+async def trend_analyzer(current_state: MarketIntelligenceState) -> Dict[str, Any]:
     logger.info(f"Trend Analyzer: Domain='{current_state.market_domain}'")
     default_trends_list = [{"trend_name": "Default Trend", "description": "No specific trends identified.", "supporting_evidence": "N/A", "estimated_impact": "Unknown", "timeframe": "Unknown"}]
     try:
@@ -692,7 +692,7 @@ def trend_analyzer(current_state: MarketIntelligenceState) -> Dict[str, Any]:
         limited_competitor_data = current_state.competitor_data[:5] if current_state.competitor_data else []
         input_data_for_llm = {"news_sample": limited_news_data, "competitors_sample": limited_competitor_data}
         logger.info(f"Trend Analyzer: Invoking LLM. News items: {len(limited_news_data)}, Competitor items: {len(limited_competitor_data)}")
-        llm_output_string = chain.invoke({
+        llm_output_string = await chain.ainvoke({ # Use ainvoke
             "market_domain": current_state.market_domain,
             "query": current_state.query or "general",
             "input_json_data": json.dumps(input_data_for_llm)
@@ -710,7 +710,7 @@ def trend_analyzer(current_state: MarketIntelligenceState) -> Dict[str, Any]:
     logger.info("Trend Analyzer: Node completed.")
     return current_state.model_dump()
 
-def opportunity_identifier(current_state: MarketIntelligenceState) -> Dict[str, Any]:
+async def opportunity_identifier(current_state: MarketIntelligenceState) -> Dict[str, Any]:
     logger.info(f"Opportunity Identifier: Domain='{current_state.market_domain}'")
     default_ops = [{"opportunity_name": "Default Opportunity", "description": "N/A"}]
     try:
@@ -724,7 +724,7 @@ def opportunity_identifier(current_state: MarketIntelligenceState) -> Dict[str, 
         ])
         chain = prompt | llm | StrOutputParser()
         limited_news = current_state.raw_news_data[:5] if current_state.raw_news_data else []
-        llm_output = chain.invoke({
+        llm_output = await chain.ainvoke({ # Use ainvoke
             "market_domain": current_state.market_domain,
             "trends_json": json.dumps(current_state.market_trends[:5] if current_state.market_trends else []),
             "data_json": json.dumps({"news_sample": limited_news})
@@ -738,7 +738,7 @@ def opportunity_identifier(current_state: MarketIntelligenceState) -> Dict[str, 
     logger.info(f"Opportunity Identifier: Found {len(current_state.opportunities)} opportunities.")
     return current_state.model_dump()
 
-def strategy_recommender(current_state: MarketIntelligenceState) -> Dict[str, Any]:
+async def strategy_recommender(current_state: MarketIntelligenceState) -> Dict[str, Any]:
     logger.info(f"Strategy Recommender: Domain='{current_state.market_domain}'")
     default_strats = [{"strategy_title": "Default Strategy", "description": "N/A"}]
     try:
@@ -752,7 +752,7 @@ def strategy_recommender(current_state: MarketIntelligenceState) -> Dict[str, An
         ])
         chain = prompt | llm | StrOutputParser()
         limited_comp = current_state.competitor_data[:5] if current_state.competitor_data else []
-        llm_output = chain.invoke({
+        llm_output = await chain.ainvoke({ # Use ainvoke
             "market_domain": current_state.market_domain,
             "ops_json": json.dumps(current_state.opportunities[:5] if current_state.opportunities else []),
             "trends_json": json.dumps(current_state.market_trends[:5] if current_state.market_trends else []),
@@ -767,7 +767,7 @@ def strategy_recommender(current_state: MarketIntelligenceState) -> Dict[str, An
     logger.info(f"Strategy Recommender: Generated {len(current_state.strategic_recommendations)} strategies.")
     return current_state.model_dump()
 
-def report_template_generator(current_state: MarketIntelligenceState) -> Dict[str, Any]:
+async def report_template_generator(current_state: MarketIntelligenceState) -> Dict[str, Any]:
     logger.info(f"Report Template Generator: Domain='{current_state.market_domain}'")
     default_tmpl = f"# Market Intelligence Report: {current_state.market_domain}\n..."
     try:
@@ -780,7 +780,7 @@ def report_template_generator(current_state: MarketIntelligenceState) -> Dict[st
             ("human", "Generate template for market: {market_domain}, query: {query}")
         ])
         chain = prompt | llm | StrOutputParser()
-        generated_template = chain.invoke({
+        generated_template = await chain.ainvoke({ # Use ainvoke
             "market_domain": current_state.market_domain,
             "query": current_state.query or "General Overview"
         })
@@ -800,7 +800,7 @@ def get_vector_store_path(current_state: MarketIntelligenceState) -> str:
     os.makedirs(report_specific_dir, exist_ok=True)
     return os.path.join(report_specific_dir, f"vector_store_faiss_{current_state.state_id[:4]}")
 
-def setup_vector_store(current_state: MarketIntelligenceState) -> Dict[str, Any]:
+async def setup_vector_store(current_state: MarketIntelligenceState) -> Dict[str, Any]: # Changed to async, though FAISS is sync
     logger.info(f"Vector Store Setup: StateID='{current_state.state_id}'")
     if not current_state.report_dir:
         current_state.report_dir = os.path.join(get_agent_base_reports_dir(), f"VS_SETUP_FALLBACK_DIR_{current_state.state_id[:4]}")
@@ -869,7 +869,7 @@ def setup_vector_store(current_state: MarketIntelligenceState) -> Dict[str, Any]
     logger.info("Vector Store Setup: Node completed.")
     return current_state.model_dump()
 
-def rag_query(current_state: MarketIntelligenceState) -> Dict[str, Any]:
+async def rag_query(current_state: MarketIntelligenceState) -> Dict[str, Any]:
     logger.info(f"RAG Query: Question='{current_state.question or 'N/A'}'")
     if not current_state.question:
         current_state.query_response = "No question provided for RAG."
@@ -898,7 +898,10 @@ def rag_query(current_state: MarketIntelligenceState) -> Dict[str, Any]:
             ("human", "Context:\n{context}\n\nQuestion: {question}\n\nAnswer:")
         ])
         qa_rag_chain = RetrievalQA.from_chain_type(llm=llm_rag, chain_type="stuff", retriever=vs_retriever, return_source_documents=True, chain_type_kwargs={"prompt": rag_chain_prompt})
-        result_from_chain = qa_rag_chain({"query": current_state.question})
+
+        # Use acall for RetrievalQA chains
+        result_from_chain = await qa_rag_chain.acall({"query": current_state.question})
+
         rag_answer = result_from_chain.get("result", "No specific answer found in context.")
         cited_sources_rag = [doc_rag.metadata.get('title') or doc_rag.metadata.get('url') or doc_rag.metadata.get('source', 'Unknown Source') for doc_rag in result_from_chain.get("source_documents", [])]
 
@@ -957,13 +960,14 @@ def generate_readme(current_state: MarketIntelligenceState, output_dir_readme: s
     readme_content_str += "\n## Notes\nThis report was automatically generated by the Market Intelligence Agent.\n"
     readme_file_path = os.path.join(output_dir_readme, "README.md")
     try:
+        # File I/O remains synchronous for now
         with open(readme_file_path, "w", encoding="utf-8") as f:
             f.write(readme_content_str)
         logger.info(f"README generated at: {readme_file_path}")
     except Exception as e_readme:
         error_logger.error(f"Failed to generate README.md: {e_readme}")
 
-def generate_market_intelligence_report(current_state: MarketIntelligenceState) -> Dict[str, Any]:
+async def generate_market_intelligence_report(current_state: MarketIntelligenceState) -> Dict[str, Any]:
     logger.info(f"Report Generation: Domain='{current_state.market_domain}', StateID='{current_state.state_id}'")
     if not current_state.report_dir or not os.path.isdir(current_state.report_dir):
         error_logger.critical(f"CRITICAL: report_dir '{current_state.report_dir}' is invalid.")
@@ -1017,7 +1021,7 @@ def generate_market_intelligence_report(current_state: MarketIntelligenceState) 
                 ("human", "Template:\n{template_content}\n\nData (JSON):\n{json_report_data}\n\nChart Filenames (comma-separated):\n{csv_chart_filenames}")
             ])
             chain = prompt | llm_report | StrOutputParser()
-            final_generated_markdown = chain.invoke({
+            final_generated_markdown = await chain.ainvoke({ # Use ainvoke
                 "template_content": current_state.report_template,
                 "json_report_data": json.dumps(report_data_for_llm),
                 "csv_chart_filenames": ", ".join(current_state.chart_paths or [])
@@ -1029,7 +1033,7 @@ def generate_market_intelligence_report(current_state: MarketIntelligenceState) 
                 ("human", "Data (JSON):\n{json_report_data}\n\nChart Filenames (comma-separated):\n{csv_chart_filenames}")
             ])
             chain = prompt | llm_report | StrOutputParser()
-            final_generated_markdown = chain.invoke({
+            final_generated_markdown = await chain.ainvoke({ # Use ainvoke
                 "json_report_data": json.dumps(report_data_for_llm),
                 "csv_chart_filenames": ", ".join(current_state.chart_paths or [])
             })
@@ -1096,7 +1100,7 @@ def create_market_intelligence_workflow() -> StateGraph:
     logger.info("Market intelligence workflow compiled.")
     return workflow_instance.compile()
 
-def run_market_intelligence_agent(query_str: str = "Market analysis", market_domain_str: str = "Technology", question_str: Optional[str] = None) -> Dict[str, Any]:
+async def run_market_intelligence_agent(query_str: str = "Market analysis", market_domain_str: str = "Technology", question_str: Optional[str] = None) -> Dict[str, Any]:
     run_start_ts = datetime.now()
     logger.info(f"Agent Run: Started at {run_start_ts.isoformat()}. Query='{query_str}', Domain='{market_domain_str}', Question='{question_str or 'N/A'}'")
     required_env_vars = ["TAVILY_API_KEY", "GOOGLE_API_KEY"]
@@ -1132,7 +1136,8 @@ def run_market_intelligence_agent(query_str: str = "Market analysis", market_dom
 
     try:
         logger.info(f"Agent Run: Invoking workflow. State ID: {current_run_initial_state.state_id}")
-        final_run_state_dict = compiled_agent_workflow.invoke(current_run_initial_state)
+        # Assuming compiled_agent_workflow has an ainvoke method for async execution
+        final_run_state_dict = await compiled_agent_workflow.ainvoke(current_run_initial_state)
         final_run_state = MarketIntelligenceState(**final_run_state_dict)
         logger.info(f"Agent Run: Workflow completed. Final State ID: {final_run_state.state_id}")
 
@@ -1204,7 +1209,7 @@ def run_market_intelligence_agent(query_str: str = "Market analysis", market_dom
             "query_response": None
         }
 
-def chat_with_agent(message: str, session_id: str, history: List[Dict[str, Any]]) -> str:
+async def chat_with_agent(message: str, session_id: str, history: List[Dict[str, Any]]) -> str:
     logger.info(f"Agent Chat: Received message for session_id {session_id}: '{message}'")
     save_chat_message(session_id, "user", message)
     langchain_history = []
@@ -1224,7 +1229,8 @@ def chat_with_agent(message: str, session_id: str, history: List[Dict[str, Any]]
             ("human", "{input}")
         ])
         chain = prompt_template | chat_llm | StrOutputParser()
-        response_text = chain.invoke({"input": message, "chat_history": langchain_history})
+        # Assuming chain has an ainvoke method for async execution
+        response_text = await chain.ainvoke({"input": message, "chat_history": langchain_history})
         save_chat_message(session_id, "ai", response_text)
         logger.info(f"Agent Chat: Response generated for session_id {session_id}.")
         return response_text
@@ -1243,12 +1249,14 @@ if __name__ == "__main__":
     parsed_cli_args = cmd_arg_parser.parse_args()
 
     logger.info(f"Agent CLI: Starting with Query='{parsed_cli_args.query}', Market='{parsed_cli_args.market}', Question='{parsed_cli_args.question or 'N/A'}'")
-
-    cli_run_output = run_market_intelligence_agent(
+    # Note: This local CLI runner will need to be adapted to run an async function,
+    # e.g., using asyncio.run()
+    import asyncio
+    cli_run_output = asyncio.run(run_market_intelligence_agent(
         query_str=parsed_cli_args.query,
         market_domain_str=parsed_cli_args.market,
         question_str=parsed_cli_args.question
-    )
+    ))
 
     print("--- Agent CLI Run Summary ---")
     print(f"Success: {cli_run_output.get('success')}")
