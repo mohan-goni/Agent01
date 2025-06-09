@@ -1,9 +1,11 @@
 "use client"
 
-import type React from "react"
+"use client"
 
+import type React from "react"
 import { useState } from "react"
-import { signIn } from "@/lib/auth-client"
+import { useRouter } from "next/navigation" // Added for redirection
+import { supabase } from "@/lib/supabaseClient" // Added Supabase client
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -11,32 +13,43 @@ import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
 
 export default function LoginForm() {
+  const router = useRouter() // Added router
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null) // Added error state
 
-  const handleEmailLogin = async (e: React.FormEvent) => {
+  const handleEmailLogin = async (e: React.FormEvent<HTMLFormElement>) => { // Typed event
     e.preventDefault()
     setLoading(true)
+    setError(null) // Clear previous errors
 
     try {
-      const { error, session } = await signIn("email", { email, password })
+      const { data, error: signInError } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      })
 
-      if (error) {
-        console.error("Login error:", error)
-        // TODO: Display error to user
-      } else if (session) {
-        window.location.href = "/dashboard"
+      if (signInError) {
+        console.error("Login error:", signInError.message)
+        setError(signInError.message)
+      } else if (data.session) {
+        router.push("/dashboard") // Use router for navigation
+        router.refresh(); // Refresh server components
+      } else {
+        // Should not happen if signInError is null and session is null, but as a fallback
+        setError("An unexpected error occurred. Please try again.")
       }
-    } catch (err) {
-      // Catch any unexpected errors from signIn itself, though better-auth aims to return them in `error`
+    } catch (err: any) { // Catch any unexpected errors
       console.error("Unexpected login function error:", err)
+      setError(err.message || "An unexpected error occurred.")
     } finally {
       setLoading(false)
     }
   }
 
   const handleGoogleLogin = () => {
+    // This will likely need to be updated for Supabase Google Auth later
     window.location.href = "/api/auth/sign-in/google"
   }
 
@@ -102,6 +115,9 @@ export default function LoginForm() {
                 required
               />
             </div>
+            {error && (
+              <p className="text-sm text-red-600 dark:text-red-400 text-center">{error}</p>
+            )}
             <Button type="submit" className="w-full" disabled={loading}>
               {loading ? "Signing in..." : "Sign In"}
             </Button>
