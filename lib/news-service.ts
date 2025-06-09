@@ -10,10 +10,10 @@ interface NewsArticle {
 }
 
 export class NewsService {
-  private newsApiKey = process.env.news_api!
-  private mediastackKey = process.env.mediastack!
-  private gnewsKey = process.env.Gnews!
-  private tavilyKey = process.env.tavily!
+  private newsApiKey = process.env.NEWS_API_KEY!
+  private mediastackKey = process.env.MEDIASTACK_API_KEY!
+  private gnewsKey = process.env.GNEWS_API_KEY!
+  private tavilyKey = process.env.TAVILY_API_KEY!
 
   async fetchFromNewsAPI(query = "market intelligence", category = "business"): Promise<NewsArticle[]> {
     try {
@@ -125,14 +125,123 @@ export class NewsService {
     }
   }
 
+  async fetchFromSerpAPI(query = "market intelligence"): Promise<NewsArticle[]> {
+    const apiKey = process.env.SERPAPI_API_KEY;
+    if (!apiKey) {
+      console.warn("SERPAPI_API_KEY not set. Skipping SerpAPI fetch.");
+      return [];
+    }
+    try {
+      // Using a common SerpApi endpoint for Google Search
+      const searchParams = new URLSearchParams({
+        q: query,
+        api_key: apiKey,
+        engine: "google",
+        num: "10", // Get 10 results
+      });
+      const response = await fetch(`https://serpapi.com/search.json?${searchParams.toString()}`);
+      if (!response.ok) {
+        console.error(`SerpAPI request failed with status ${response.status}: ${await response.text()}`);
+        return [];
+      }
+      const data = await response.json();
+      return (
+        data.organic_results?.map((result: any) => ({
+          title: result.title,
+          description: result.snippet || result.title, // Use snippet if available
+          content: result.snippet || result.title,
+          url: result.link,
+          source: result.source || new URL(result.link).hostname, // result.source if available
+          author: "Unknown",
+          publishedAt: result.date || new Date().toISOString(), // result.date if available
+          category: "search",
+        })) || []
+      );
+    } catch (error) {
+      console.error("SerpAPI error:", error);
+      return [];
+    }
+  }
+
+  async fetchFromFMP(query = "market trends"): Promise<any[]> {
+    const apiKey = process.env.FINANCIAL_MODELING_PREP_API_KEY;
+    if (!apiKey) {
+      console.warn("FINANCIAL_MODELING_PREP_API_KEY not set. Skipping FMP fetch.");
+      return [];
+    }
+    try {
+      // Example: Search for company names matching query. FMP has a search endpoint.
+      // Or, if query is a symbol, fetch quote. This is a simplified example.
+      const searchParams = new URLSearchParams({
+        query: query,
+        limit: "5",
+        apikey: apiKey,
+      });
+      // Using FMP's general search endpoint as an example
+      const response = await fetch(`https://financialmodelingprep.com/api/v3/search-name?${searchParams.toString()}`);
+      if (!response.ok) {
+        console.error(`FMP request failed with status ${response.status}: ${await response.text()}`);
+        return [];
+      }
+      const data = await response.json();
+      // Transform data as needed, structure will depend on the chosen FMP endpoint
+      return data.map((item: any) => ({
+          source: "FinancialModelingPrep",
+          type: "company_search_result", // Example type
+          symbol: item.symbol,
+          name: item.name,
+          data: item, // Include the raw item for now
+      }));
+    } catch (error) {
+      console.error("FMP error:", error);
+      return [];
+    }
+  }
+
+  async fetchFromAlphaVantage(query = "market overview"): Promise<any[]> {
+    const apiKey = process.env.ALPHA_VANTAGE_API_KEY;
+    if (!apiKey) {
+      console.warn("ALPHA_VANTAGE_API_KEY not set. Skipping Alpha Vantage fetch.");
+      return [];
+    }
+    try {
+      // Example: Use Alpha Vantage's SYMBOL_SEARCH.
+      // Or, if query is a symbol, fetch time series. This is a simplified example.
+      const searchParams = new URLSearchParams({
+        function: "SYMBOL_SEARCH",
+        keywords: query,
+        apikey: apiKey,
+      });
+      const response = await fetch(`https://www.alphavantage.co/query?${searchParams.toString()}`);
+       if (!response.ok) {
+        console.error(`Alpha Vantage request failed with status ${response.status}: ${await response.text()}`);
+        return [];
+      }
+      const data = await response.json();
+      // Transform data: AV search results are in 'bestMatches'
+      return (data.bestMatches?.map((match: any) => ({
+          source: "AlphaVantage",
+          type: "symbol_search_result", // Example type
+          symbol: match["1. symbol"],
+          name: match["2. name"],
+          region: match["4. region"],
+          data: match, // Include the raw match
+      })) || []);
+    } catch (error) {
+      console.error("Alpha Vantage error:", error);
+      return [];
+    }
+  }
+
   async aggregateNews(query = "market intelligence"): Promise<NewsArticle[]> {
-    const [newsApi, mediaStack, gnews, tavily] = await Promise.all([
+    const [newsApi, mediaStack, gnews, tavily, serpApi] = await Promise.all([
       this.fetchFromNewsAPI(query),
       this.fetchFromMediaStack(query),
       this.fetchFromGNews(query),
       this.fetchFromTavily(query),
+      this.fetchFromSerpAPI(query),
     ])
 
-    return [...newsApi, ...mediaStack, ...gnews, ...tavily]
+    return [...newsApi, ...mediaStack, ...gnews, ...tavily, ...serpApi]
   }
 }
