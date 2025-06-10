@@ -18,9 +18,8 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en" suppressHydrationWarning={true}> {/* Added suppressHydrationWarning */}
+    <html lang="en" suppressHydrationWarning={true}>
       <head>
-        {/* Standard Next.js head elements will be injected here */}
       </head>
       <body className={inter.className}>
         <ThemeProvider
