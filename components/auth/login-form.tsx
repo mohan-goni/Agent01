@@ -4,8 +4,8 @@
 
 import type React from "react"
 import { useState } from "react"
-import { useRouter } from "next/navigation" // Added for redirection
-import { supabase } from "@/lib/supabaseClient" // Added Supabase client
+import { useRouter } from "next/navigation" 
+import { supabase } from "@/lib/supabaseClient" 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
