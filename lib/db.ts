@@ -1,333 +1,458 @@
-import { drizzle } from 'drizzle-orm/postgres-js';
-import postgres from 'postgres';
-import { eq, desc, count } from 'drizzle-orm';
-import * as schema from '../db/schema';
+import { supabase } from './supabaseClient'; // Adjusted path
+import type { Database } from '../types/supabase'; // Adjusted path
 
-// Create the connection
-const connectionString = process.env.DATABASE_URL!;
-const client = postgres(connectionString);
-const db = drizzle(client, { schema });
+// Define types for easier usage, using Supabase generated types
+type UserProfile = Database['public']['Tables']['user_profiles']['Row'];
+type UserProfileInsert = Database['public']['Tables']['user_profiles']['Insert'];
+type UserProfileUpdate = Database['public']['Tables']['user_profiles']['Update'];
 
-export { db, client }; // Exporting db instance and client for potential direct use if needed
+type DataSource = Database['public']['Tables']['data_sources']['Row'];
+type DataSourceInsert = Database['public']['Tables']['data_sources']['Insert'];
+type DataSourceUpdate = Database['public']['Tables']['data_sources']['Update'];
 
-export async function getUserProfile(userId: string) {
-  const result = await db.select()
-    .from(schema.userProfiles)
-    .where(eq(schema.userProfiles.userId, userId))
-    .limit(1);
-  return result[0];
+type Article = Database['public']['Tables']['articles']['Row'];
+type ArticleInsert = Database['public']['Tables']['articles']['Insert'];
+
+type UserSavedArticle = Database['public']['Tables']['user_saved_articles']['Row'];
+type UserSavedArticleInsert = Database['public']['Tables']['user_saved_articles']['Insert'];
+
+type MarketInsight = Database['public']['Tables']['market_insights']['Row'];
+type MarketInsightInsert = Database['public']['Tables']['market_insights']['Insert'];
+
+type ApiKey = Database['public']['Tables']['api_keys']['Row'];
+type ApiKeyInsert = Database['public']['Tables']['api_keys']['Insert'];
+type ApiKeyUpdate = Database['public']['Tables']['api_keys']['Update'];
+
+
+// Note: The original schema used 'userId' in many places.
+// Supabase types might use 'id' for primary keys and 'user_id' for foreign keys to auth.users.id or a local 'users' table's UUID.
+// We will assume 'user_id' is the column name in tables that links to the authenticated Supabase user's ID (UUID).
+// If user_profiles.id is the Supabase user ID, then other tables should reference that.
+// The types/supabase.ts will be the source of truth for column names.
+// For this rewrite, I'll assume FKs to the user are named `user_id` and are of UUID type.
+
+export async function getUserProfile(userId: string): Promise<UserProfile | null> {
+  const { data, error } = await supabase
+    .from('user_profiles')
+    .select('*')
+    .eq('id', userId) // Assuming 'id' in user_profiles IS the Supabase auth user ID (UUID)
+    .single();
+
+  if (error) {
+    console.error('Error fetching user profile:', error.message);
+    return null;
+  }
+  return data;
 }
 
-export async function createUserProfile(userId: string, email: string, name?: string) {
-  const result = await db.insert(schema.userProfiles)
-    .values({ userId, email, name })
-    .onConflictDoUpdate({
-      target: schema.userProfiles.userId,
-      set: {
-        email,
-        name,
-        updatedAt: new Date()
-      }
-    })
-    .returning();
-  return result[0];
+export async function createUserProfile(profileData: UserProfileInsert): Promise<UserProfile | null> {
+  // Ensure `id` in profileData is the Supabase auth user ID.
+  // Supabase typically handles user creation in auth.users table.
+  // This function likely creates a profile linked to an existing auth user.
+  const { data, error } = await supabase
+    .from('user_profiles')
+    .insert(profileData)
+    .select()
+    .single();
+
+  if (error) {
+    console.error('Error creating user profile:', error.message);
+    // Consider upsert if profile might already exist for a user_id
+    // const { data: upsertData, error: upsertError } = await supabase
+    //   .from('user_profiles')
+    //   .upsert(profileData, { onConflict: 'user_id' }) // Assuming user_id is unique constraint for upsert
+    //   .select()
+    //   .single();
+    // if (upsertError) {
+    //   console.error('Error upserting user profile:', upsertError.message);
+    //   return null;
+    // }
+    // return upsertData;
+    return null;
+  }
+  return data;
 }
 
-// CRUD functions for Data Sources
-export async function getDataSourcesByUserId(userId: string) {
+export async function getDataSourcesByUserId(userId: string): Promise<DataSource[]> {
   if (!userId) {
     console.warn("getDataSourcesByUserId called with no userId");
     return [];
   }
-  return db.select()
-    .from(schema.dataSources)
-    .where(eq(schema.dataSources.userId, userId))
-    .orderBy(desc(schema.dataSources.createdAt));
+  const { data, error } = await supabase
+    .from('data_sources')
+    .select('*')
+    .eq('user_id', userId) // Assuming 'user_id' column exists and is the FK to auth user
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    console.error('Error fetching data sources:', error.message);
+    return [];
+  }
+  return data || [];
 }
 
-export async function createDataSource(
-  userId: string,
-  name: string,
-  type: string,
-  config: any, // JSONB, so 'any' is appropriate here for the input
-  status: string = 'pending',
-  isEnabled: boolean = true
-) {
-  if (!userId) {
+export async function createDataSource(dataSourceData: DataSourceInsert): Promise<DataSource | null> {
+  if (!dataSourceData.user_id) {
     throw new Error("User ID is required to create a Data Source.");
   }
-  // Ensure config is an object, default to empty object if not.
-  const validConfig = (typeof config === 'object' && config !== null) ? config : {};
+  const { data, error } = await supabase
+    .from('data_sources')
+    .insert(dataSourceData)
+    .select()
+    .single();
 
-  const result = await db.insert(schema.dataSources)
-    .values({
-      userId,
-      name,
-      type,
-      config: validConfig,
-      status,
-      isEnabled,
-      lastSyncedAt: null, // Explicitly set lastSyncedAt to null on creation
-    })
-    .returning();
-  return result[0];
+  if (error) {
+    console.error('Error creating data source:', error.message);
+    return null;
+  }
+  return data;
 }
 
 export async function updateDataSource(
-  dataSourceId: number,
-  userId: string,
-  updates: Partial<Omit<typeof schema.dataSources.$inferInsert, 'id' | 'userId' | 'createdAt'>> // Allow updates to most fields
-) {
+  dataSourceId: number, // Assuming 'id' is the PK of data_sources
+  userId: string, // For authorization check
+  updates: Partial<DataSourceUpdate>
+): Promise<DataSource | null> {
   if (!userId) {
     throw new Error("User ID is required for updating a Data Source.");
   }
   if (Object.keys(updates).length === 0) {
-    // Avoid performing an update if there are no changes.
-    // Fetch and return the existing record instead.
-    const existing = await db.select().from(schema.dataSources).where(eq(schema.dataSources.id, dataSourceId) && eq(schema.dataSources.userId, userId));
-    return existing[0];
+    const { data: existingData, error: existingError } = await supabase
+      .from('data_sources')
+      .select('*')
+      .eq('id', dataSourceId)
+      .eq('user_id', userId) // Ensure user owns this data source
+      .single();
+    if (existingError) console.error('Error fetching existing data source for no-op update:', existingError.message);
+    return existingData;
   }
 
-  const result = await db.update(schema.dataSources)
-    .set({ ...updates, updatedAt: new Date() })
-    .where(eq(schema.dataSources.id, dataSourceId) && eq(schema.dataSources.userId, userId))
-    .returning();
-  return result[0];
+  const { data, error } = await supabase
+    .from('data_sources')
+    .update({ ...updates, updated_at: new Date().toISOString() })
+    .eq('id', dataSourceId)
+    .eq('user_id', userId) // Ensure user owns this data source
+    .select()
+    .single();
+
+  if (error) {
+    console.error('Error updating data source:', error.message);
+    return null;
+  }
+  return data;
 }
 
-export async function deleteDataSourceById(dataSourceId: number, userId: string) {
+export async function deleteDataSourceById(dataSourceId: number, userId: string): Promise<boolean> {
   if (!userId) {
     throw new Error("User ID is required for deleting a Data Source.");
   }
-  const result = await db.delete(schema.dataSources)
-    .where(eq(schema.dataSources.id, dataSourceId) && eq(schema.dataSources.userId, userId))
-    .returning({ id: schema.dataSources.id });
-  return result.length > 0;
+  const { error, count } = await supabase
+    .from('data_sources')
+    .delete({ count: 'exact' })
+    .eq('id', dataSourceId)
+    .eq('user_id', userId); // Ensure user owns this data source
+
+  if (error) {
+    console.error('Error deleting data source:', error.message);
+    return false;
+  }
+  return (count ?? 0) > 0;
 }
 
-// Specific update functions for status and isEnabled can be handled by updateDataSource
-// e.g., updateDataSource(id, userId, { status: newStatus })
-// e.g., updateDataSource(id, userId, { isEnabled: newIsEnabled })
-// No need for separate updateDataSourceStatus or updateDataSourceIsEnabled if updateDataSource is flexible.
+export async function saveArticle(article: ArticleInsert): Promise<Article | null> {
+  // Supabase client handles date string conversion for timestamp fields
+  // Ensure `published_at` is in a format Supabase accepts (ISO 8601 string) if it's a date.
+  // JSONB fields like 'keywords' should be passed as JS objects/arrays.
 
-// Updated 'article' type hint for clarity, though still 'any' as per original task.
-export async function saveArticle(article: {
-  title: string;
-  url: string;
-  content?: string;
-  source?: string;
-  publishedAt?: Date | string | null; // Allow null
-  description?: string;
-  author?: string;
-  category?: string;
-  sentimentScore?: string | number | null; // Drizzle handles string to numeric for decimal
-  aiSummary?: string;
-  keywords?: string[]; // Expecting array of strings for jsonb
-}) {
-  // Helper to convert publishedAt to Date or null
-  const parsePublishedAt = (dateInput: any): Date | null => {
-    if (!dateInput) return null;
-    const date = new Date(dateInput);
-    return isNaN(date.getTime()) ? null : date;
-  };
+  // Upsert based on unique 'url'
+  const { data, error } = await supabase
+    .from('articles')
+    .upsert(article, { onConflict: 'url' })
+    .select()
+    .single();
 
-  const valuesToInsert = {
-    title: article.title,
-    url: article.url,
-    description: article.description,
-    content: article.content,
-    source: article.source,
-    author: article.author,
-    publishedAt: parsePublishedAt(article.publishedAt),
-    category: article.category,
-    sentimentScore: article.sentimentScore !== undefined && article.sentimentScore !== null ? String(article.sentimentScore) : null, // Ensure string for Drizzle if not null
-    aiSummary: article.aiSummary,
-    keywords: article.keywords, // Pass as is, Drizzle/pg handles JSONB
-    // createdAt will be set by default by the DB
-    // updatedAt should also be set by default by the DB on update, but explicit for insert is fine
-    // For onConflictDoUpdate, updatedAt is explicitly set.
-  };
+  if (error) {
+    console.error('Error saving article (upsert):', error.message);
+    return null;
+  }
+  return data;
+}
 
-  const result = await db.insert(schema.articles)
-    .values(valuesToInsert)
-    .onConflictDoUpdate({
-      target: schema.articles.url,
-      set: {
-        title: article.title,
-        description: article.description,
-        content: article.content,
-        source: article.source,
-        author: article.author,
-        publishedAt: parsePublishedAt(article.publishedAt),
-        category: article.category,
-        sentimentScore: article.sentimentScore !== undefined && article.sentimentScore !== null ? String(article.sentimentScore) : null,
-        aiSummary: article.aiSummary,
-        keywords: article.keywords,
-        updatedAt: new Date() // Explicitly set updatedAt on conflict
+export async function getArticles(limit = 20, offset = 0): Promise<Article[]> {
+  const { data, error } = await supabase
+    .from('articles')
+    .select('*')
+    .order('published_at', { ascending: false, nullsFirst: false }) // Assuming published_at exists
+    .range(offset, offset + limit - 1);
+
+  if (error) {
+    console.error('Error fetching articles:', error.message);
+    return [];
+  }
+  return data || [];
+}
+
+export async function getUserSavedArticles(userId: string): Promise<Array<Article & { saved_at: string | null }>> {
+  // This requires a join or a view if we want to get full article details along with saved_at.
+  // Supabase doesn't do joins in the client library as complex as Drizzle.
+  // Option 1: Fetch saved article IDs, then fetch articles. (N+1 problem)
+  // Option 2: Create a DB view or function and call it via rpc.
+  // Option 3: Fetch from user_saved_articles and then enrich (client-side join or separate queries).
+
+  // For simplicity, let's fetch from user_saved_articles and then get full articles.
+  // This is less efficient but direct with basic JS client.
+  // A more performant way would be to use an RPC function in Supabase.
+
+  const { data: savedJoins, error: savedJoinsError } = await supabase
+    .from('user_saved_articles')
+    .select('article_id, saved_at')
+    .eq('user_id', userId) // Assuming user_id column on user_saved_articles
+    .order('saved_at', { ascending: false });
+
+  if (savedJoinsError) {
+    console.error('Error fetching user saved article links:', savedJoinsError.message);
+    return [];
+  }
+  if (!savedJoins || savedJoins.length === 0) {
+    return [];
+  }
+
+  const articleIds = savedJoins.map(j => j.article_id);
+
+  const { data: articles, error: articlesError } = await supabase
+    .from('articles')
+    .select('*')
+    .in('id', articleIds);
+
+  if (articlesError) {
+    console.error('Error fetching full saved articles:', articlesError.message);
+    return [];
+  }
+
+  // Combine articles with their saved_at times
+  const result = articles.map(article => {
+    const joinInfo = savedJoins.find(j => j.article_id === article.id);
+    return { ...article, saved_at: joinInfo?.saved_at || null };
+  });
+
+  // Re-sort by saved_at because the .in() query doesn't preserve the original order
+  result.sort((a, b) => {
+    if (a.saved_at && b.saved_at) return new Date(b.saved_at).getTime() - new Date(a.saved_at).getTime();
+    if (a.saved_at) return -1;
+    if (b.saved_at) return 1;
+    return 0;
+  });
+
+  return result;
+}
+
+
+export async function saveMarketInsight(insightData: MarketInsightInsert): Promise<MarketInsight | null> {
+  // Supabase types for market_insights include: id, title, summary, content, source, published_at, tags, sentiment, created_at, updated_at
+  // The old function had insightType, confidenceScore. These are not in the Supabase type.
+  // We should use the columns defined in `types/supabase.ts` for `MarketInsightInsert`.
+  // If `insightType` and `confidenceScore` are needed, the `market_insights` table type definition needs them.
+  // For now, assuming they are not part of the current Supabase schema for `market_insights`.
+  // If they were, the insert would be:
+  // const { data, error } = await supabase.from('market_insights').insert({ title, content, insight_type: insightType, confidence_score: confidenceScore, ...other_valid_fields }).select().single();
+
+  // Sticking to the columns available in MarketInsightInsert from types/supabase.ts
+  const { data, error } = await supabase
+    .from('market_insights')
+    .insert(insightData) // Pass the full object matching the type
+    .select()
+    .single();
+
+  if (error) {
+    console.error('Error saving market insight:', error.message);
+    return null;
+  }
+  return data;
+}
+
+export async function getAllUsers(): Promise<UserProfile[]> {
+  // Queries user_profiles table, assuming user_profiles.id is the Supabase auth user ID.
+  const { data, error } = await supabase
+    .from('user_profiles')
+    .select('*') // Selects all columns as defined in UserProfile type
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    console.error('Error fetching all user profiles:', error.message);
+    return [];
+  }
+  return data || [];
+}
+
+export async function saveUserArticle(userId: string, articleId: number): Promise<UserSavedArticle | null> {
+  const insertData: UserSavedArticleInsert = { user_id: userId, article_id: articleId };
+  // Supabase client handles default for saved_at if DB schema is set up for it.
+  // Or provide it: insertData.saved_at = new Date().toISOString();
+
+  const { data, error } = await supabase
+    .from('user_saved_articles')
+    .insert(insertData)
+    .select()
+    .single(); // Assuming onConflictDoNothing is handled by DB policy or trigger, or we expect unique constraint failure
+               // For explicit onConflictDoNothing, Supabase requires an upsert with ignoreDuplicates: true
+               // const { data, error } = await supabase.from('user_saved_articles').upsert(insertData, { onConflict: 'user_id,article_id', ignoreDuplicates: true }).select().single();
+               // This depends on 'user_id,article_id' being the primary key or a unique constraint.
+               // types/supabase.ts implies user_saved_articles has (user_id, article_id) as PK implicitly by structure.
+
+  if (error) {
+    // If it's a unique constraint violation (23505), it means it's already saved.
+    if (error.code === '23505') {
+      console.log('Article already saved for user.');
+      // Optionally, fetch the existing record if needed, or just return null/special object
+      const { data: existingData, error: existingError } = await supabase
+        .from('user_saved_articles')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('article_id', articleId)
+        .single();
+      if (existingError) {
+        console.error('Error fetching existing saved article:', existingError.message);
+        return null;
       }
-    })
-    .returning();
-  return result[0];
+      return existingData;
+    }
+    console.error('Error saving user article:', error.message);
+    return null;
+  }
+  return data;
 }
 
-export async function getArticles(limit = 20, offset = 0) {
-  const result = await db.select()
-    .from(schema.articles)
-    .orderBy(desc(schema.articles.publishedAt))
-    .limit(limit)
-    .offset(offset);
-  return result;
+export async function removeUserArticle(userId: string, articleId: number): Promise<boolean> {
+  const { error, count } = await supabase
+    .from('user_saved_articles')
+    .delete({ count: 'exact' })
+    .eq('user_id', userId)
+    .eq('article_id', articleId);
+
+  if (error) {
+    console.error('Error removing user article:', error.message);
+    return false;
+  }
+  return (count ?? 0) > 0;
 }
 
-export async function getUserSavedArticles(userId: string) {
-  const result = await db.select({
-      id: schema.articles.id,
-      title: schema.articles.title,
-      url: schema.articles.url,
-      content: schema.articles.content,
-      source: schema.articles.source,
-      publishedAt: schema.articles.publishedAt,
-      // Add new fields from articles table
-      description: schema.articles.description,
-      author: schema.articles.author,
-      category: schema.articles.category,
-      sentimentScore: schema.articles.sentimentScore,
-      aiSummary: schema.articles.aiSummary,
-      keywords: schema.articles.keywords,
-      createdAt: schema.articles.createdAt, // from articles table
-      updatedAt: schema.articles.updatedAt, // from articles table
-      savedAt: schema.userSavedArticles.savedAt // from user_saved_articles table
-    })
-    .from(schema.articles)
-    .innerJoin(schema.userSavedArticles, eq(schema.articles.id, schema.userSavedArticles.articleId))
-    .where(eq(schema.userSavedArticles.userId, userId))
-    .orderBy(desc(schema.userSavedArticles.savedAt));
-  return result;
+export async function getInsights(limit = 10, offset = 0): Promise<MarketInsight[]> {
+  const { data, error } = await supabase
+    .from('market_insights')
+    .select('*')
+    .order('created_at', { ascending: false }) // Assuming created_at exists
+    .range(offset, offset + limit - 1);
+
+  if (error) {
+    console.error('Error fetching insights:', error.message);
+    return [];
+  }
+  return data || [];
 }
 
-// TODO: Add basic CRUD functions for:
-// - market_insights
-// - data_sources
-// - api_keys
-// For now, focusing on refactoring existing functions.
+export async function getDatabaseStats(): Promise<{ articles: number; insights: number; users: number }> {
+  // Note: count() in Supabase can be done with { count: 'exact' } on select
+  // For multiple counts, it's often multiple queries or an RPC.
 
-export async function saveMarketInsight(
-  title: string,
-  content: string,
-  insightType: string = "daily", // Default value for insightType
-  confidenceScore: number = 0.85 // Default value for confidenceScore
-) {
-  const result = await db.insert(schema.marketInsights)
-    .values({
-      title,
-      content,
-      insightType,
-      confidenceScore: String(confidenceScore), // Assuming schema might expect string for decimal
-      // createdAt will be set by default by the DB
-    })
-    .returning();
-  return result[0];
-}
+  let articlesCount = 0;
+  let insightsCount = 0;
+  let usersCount = 0;
 
-export async function getAllUsers() {
-  // This function will replace the one from lib/database.ts that queried neon_auth.users_sync.
-  // It should now query the userProfiles table (or users table if that's the final name).
-  // Assuming userProfiles is the correct table as per other functions in this file.
-  const result = await db.select({
-    id: schema.userProfiles.userId, // Assuming userId is the primary identifier
-    email: schema.userProfiles.email,
-    name: schema.userProfiles.name,
-    createdAt: schema.userProfiles.createdAt,
-    // Add any other fields that were previously returned by getAllUsers from neon_auth.users_sync if needed.
-  })
-  .from(schema.userProfiles)
-  .orderBy(desc(schema.userProfiles.createdAt));
-  return result;
-}
+  const { count: artCount, error: artError } = await supabase
+    .from('articles')
+    .select('*', { count: 'exact', head: true }); // head:true makes it not return data
+  if (artError) console.error("Error counting articles:", artError.message);
+  else articlesCount = artCount ?? 0;
 
-export async function saveUserArticle(userId: string, articleId: number) {
-  const result = await db.insert(schema.userSavedArticles)
-    .values({ userId, articleId })
-    .onConflictDoNothing() // Or .onConflictDoUpdate if we need to update savedAt, for now, do nothing if already saved
-    .returning({ savedAt: schema.userSavedArticles.savedAt });
-  return result[0];
-}
+  const { count: insCount, error: insError } = await supabase
+    .from('market_insights')
+    .select('*', { count: 'exact', head: true });
+  if (insError) console.error("Error counting insights:", insError.message);
+  else insightsCount = insCount ?? 0;
 
-export async function removeUserArticle(userId: string, articleId: number) {
-  const result = await db.delete(schema.userSavedArticles)
-    .where(eq(schema.userSavedArticles.userId, userId) && eq(schema.userSavedArticles.articleId, articleId))
-    .returning();
-  return result.length > 0; // Return true if a row was deleted
-}
-
-export async function getInsights(limit = 10, offset = 0) {
-  // Assuming marketInsights schema has createdAt. If not, order by 'id' or another appropriate field.
-  return db.select()
-    .from(schema.marketInsights)
-    .orderBy(desc(schema.marketInsights.createdAt)) // Ensure createdAt exists and is appropriate for ordering
-    .limit(limit)
-    .offset(offset);
-}
-
-export async function getDatabaseStats() {
-  const articlesCountResult = await db.select({ count: count() }).from(schema.articles);
-  const insightsCountResult = await db.select({ count: count() }).from(schema.marketInsights);
-  const usersCountResult = await db.select({ count: count() }).from(schema.userProfiles);
+  const { count: usrCount, error: usrError } = await supabase
+    .from('user_profiles') // Assuming user_profiles represents users for stats
+    .select('*', { count: 'exact', head: true });
+  if (usrError) console.error("Error counting users:", usrError.message);
+  else usersCount = usrCount ?? 0;
 
   return {
-    articles: articlesCountResult[0]?.count || 0,
-    insights: insightsCountResult[0]?.count || 0,
-    users: usersCountResult[0]?.count || 0,
-    // TODO: Add other stats if needed, e.g., saved articles, data sources
+    articles: articlesCount,
+    insights: insightsCount,
+    users: usersCount,
   };
 }
 
-// CRUD functions for API Keys
-export async function getApiKeysByUserId(userId: string) {
+export async function getApiKeysByUserId(userId: string): Promise<ApiKey[]> {
   if (!userId) {
-    // Handle cases where userId might be undefined or null early, though session check should prevent this.
     console.warn("getApiKeysByUserId called with no userId");
     return [];
   }
-  return db.select()
-    .from(schema.apiKeys)
-    .where(eq(schema.apiKeys.userId, userId))
-    .orderBy(desc(schema.apiKeys.createdAt));
+  const { data, error } = await supabase
+    .from('api_keys')
+    .select('*')
+    .eq('user_id', userId) // Assuming user_id column
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    console.error('Error fetching API keys:', error.message);
+    return [];
+  }
+  return data || [];
 }
 
-export async function createApiKey(userId: string, serviceName: string, apiKey: string) {
-  if (!userId) {
+export async function createApiKey(apiKeyData: ApiKeyInsert): Promise<ApiKey | null> {
+  if (!apiKeyData.user_id) {
     throw new Error("User ID is required to create an API key.");
   }
-  const result = await db.insert(schema.apiKeys)
-    .values({
-      userId,
-      serviceName,
-      apiKey, // Remember this should ideally be encrypted before this step
-      status: 'unverified', // Default status
-    })
-    .returning();
-  return result[0];
+  // apiKeyData.api_key should ideally be encrypted by the caller before storing if sensitive
+  const { data, error } = await supabase
+    .from('api_keys')
+    .insert(apiKeyData)
+    .select()
+    .single();
+
+  if (error) {
+    console.error('Error creating API key:', error.message);
+    return null;
+  }
+  return data;
 }
 
-export async function deleteApiKeyById(apiKeyId: number, userId: string) {
+export async function deleteApiKeyById(apiKeyId: number, userId: string): Promise<boolean> {
   if (!userId) {
-    // Important for security: ensure we are scoped to the user
     throw new Error("User ID is required for deletion.");
   }
-  const result = await db.delete(schema.apiKeys)
-    .where(eq(schema.apiKeys.id, apiKeyId) && eq(schema.apiKeys.userId, userId))
-    .returning({ id: schema.apiKeys.id });
-  return result.length > 0;
+  const { error, count } = await supabase
+    .from('api_keys')
+    .delete({ count: 'exact' })
+    .eq('id', apiKeyId) // Assuming 'id' is the PK of api_keys
+    .eq('user_id', userId); // Ensure user owns this key
+
+  if (error) {
+    console.error('Error deleting API key:', error.message);
+    return false;
+  }
+  return (count ?? 0) > 0;
 }
 
-export async function updateApiKeyStatus(apiKeyId: number, userId: string, status: string) {
+export async function updateApiKeyStatus(apiKeyId: number, userId: string, status: string): Promise<ApiKey | null> {
   if (!userId) {
     throw new Error("User ID is required for status update.");
   }
-  const result = await db.update(schema.apiKeys)
-    .set({ status, updatedAt: new Date() })
-    .where(eq(schema.apiKeys.id, apiKeyId) && eq(schema.apiKeys.userId, userId))
-    .returning();
-  return result[0];
+  const updates: Partial<ApiKeyUpdate> = { status, updated_at: new Date().toISOString() };
+
+  const { data, error } = await supabase
+    .from('api_keys')
+    .update(updates)
+    .eq('id', apiKeyId)
+    .eq('user_id', userId) // Ensure user owns this key
+    .select()
+    .single();
+
+  if (error) {
+    console.error('Error updating API key status:', error.message);
+    return null;
+  }
+  return data;
 }
