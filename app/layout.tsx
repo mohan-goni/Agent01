@@ -19,6 +19,9 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" suppressHydrationWarning={true}> {/* Added suppressHydrationWarning */}
+      <head>
+        {/* Standard Next.js head elements will be injected here */}
+      </head>
       <body className={inter.className}>
         <ThemeProvider
           attribute="class"
