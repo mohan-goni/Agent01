@@ -1,21 +1,23 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import React, { useState } from "react";
+import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { motion } from "framer-motion";
-import { Lock, Eye, EyeOff, Loader2, CheckCircle } from "lucide-react";
+import { Eye, EyeOff, Mail, Lock, User, Chrome, Loader2, CheckCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
-import { resetPassword } from "@/lib/auth-client";
+import { signUp, signInWithGoogle } from "@/lib/auth-client";
 import Link from "next/link";
 
-const resetPasswordSchema = z.object({
+const signupSchema = z.object({
+  fullName: z.string().min(2, "Full name must be at least 2 characters"),
+  email: z.string().email("Please enter a valid email address"),
   password: z.string()
     .min(8, "Password must be at least 8 characters")
     .regex(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/, "Password must contain at least one uppercase letter, one lowercase letter, and one number"),
@@ -25,56 +27,65 @@ const resetPasswordSchema = z.object({
   path: ["confirmPassword"],
 });
 
-type ResetPasswordFormValues = z.infer<typeof resetPasswordSchema>;
+type SignupFormValues = z.infer<typeof signupSchema>;
 
-export default function ResetPasswordForm() {
+export default function ModernSignupForm() {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
 
-  const form = useForm<ResetPasswordFormValues>({
-    resolver: zodResolver(resetPasswordSchema),
+  const form = useForm<SignupFormValues>({
+    resolver: zodResolver(signupSchema),
     defaultValues: {
+      fullName: "",
+      email: "",
       password: "",
       confirmPassword: "",
     },
   });
 
-  useEffect(() => {
-    // Check if we have the required hash fragments for password reset
-    const hashParams = new URLSearchParams(window.location.hash.substring(1));
-    const accessToken = hashParams.get('access_token');
-    const refreshToken = hashParams.get('refresh_token');
-    
-    if (!accessToken || !refreshToken) {
-      setError("Invalid or expired reset link. Please request a new password reset.");
-    }
-  }, []);
-
-  const onSubmit = async (data: ResetPasswordFormValues) => {
+  const onSubmit = async (data: SignupFormValues) => {
     setIsLoading(true);
     setError(null);
 
     try {
-      const result = await resetPassword(data.password);
+      const result = await signUp(data.email, data.password, data.fullName);
       
       if (result.error) {
         setError(result.error);
       } else {
         setSuccess(true);
-        // Redirect to login after a delay
+        // Redirect to login with success message after a delay
         setTimeout(() => {
-          router.push("/auth/login?message=Password+reset+successfully.+Please+sign+in.");
+          router.push("/auth/login?message=Account+created+successfully.+Please+sign+in.");
         }, 2000);
       }
     } catch (err) {
       setError("An unexpected error occurred. Please try again.");
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleGoogleSignIn = async () => {
+    setIsGoogleLoading(true);
+    setError(null);
+
+    try {
+      const result = await signInWithGoogle();
+      
+      if (result.error) {
+        setError(result.error);
+        setIsGoogleLoading(false);
+      }
+      // Note: For OAuth, the redirect happens automatically
+    } catch (err) {
+      setError("Failed to sign up with Google. Please try again.");
+      setIsGoogleLoading(false);
     }
   };
 
@@ -96,9 +107,9 @@ export default function ResetPasswordForm() {
               >
                 <CheckCircle className="w-8 h-8 text-white" />
               </motion.div>
-              <h2 className="text-2xl font-bold text-white mb-2">Password Reset!</h2>
+              <h2 className="text-2xl font-bold text-white mb-2">Account Created!</h2>
               <p className="text-gray-300 mb-4">
-                Your password has been successfully reset. You'll be redirected to sign in shortly.
+                Welcome to Market Intelligence Platform. You'll be redirected to sign in shortly.
               </p>
               <div className="w-8 h-8 border-2 border-purple-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
             </CardContent>
@@ -131,11 +142,11 @@ export default function ResetPasswordForm() {
               transition={{ delay: 0.2, type: "spring", stiffness: 200 }}
               className="mx-auto w-16 h-16 bg-gradient-to-r from-purple-500 to-blue-500 rounded-2xl flex items-center justify-center mb-4"
             >
-              <Lock className="w-8 h-8 text-white" />
+              <User className="w-8 h-8 text-white" />
             </motion.div>
-            <CardTitle className="text-2xl font-bold text-white">Reset Password</CardTitle>
+            <CardTitle className="text-2xl font-bold text-white">Create Account</CardTitle>
             <CardDescription className="text-gray-300">
-              Enter your new password below
+              Join Market Intelligence Platform today
             </CardDescription>
           </CardHeader>
 
@@ -150,21 +161,92 @@ export default function ResetPasswordForm() {
               </motion.div>
             )}
 
+            <Button
+              onClick={handleGoogleSignIn}
+              disabled={isGoogleLoading}
+              variant="outline"
+              className="w-full bg-white/10 border-white/20 text-white hover:bg-white/20 transition-all duration-200 transform hover:scale-[1.02] disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
+            >
+              {isGoogleLoading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Connecting...
+                </>
+              ) : (
+                <>
+                  <Chrome className="mr-2 h-4 w-4" />
+                  Sign up with Google
+                </>
+              )}
+            </Button>
+
+            <div className="relative">
+              <div className="absolute inset-0 flex items-center">
+                <div className="w-full border-t border-white/20"></div>
+              </div>
+              <div className="relative flex justify-center text-sm">
+                <span className="px-2 bg-transparent text-gray-400">Or sign up with email</span>
+              </div>
+            </div>
+
             <Form {...form}>
               <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+                <FormField
+                  control={form.control}
+                  name="fullName"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-gray-200">Full Name</FormLabel>
+                      <FormControl>
+                        <div className="relative">
+                          <User className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                          <Input
+                            {...field}
+                            placeholder="Enter your full name"
+                            className="pl-10 bg-white/10 border-white/20 text-white placeholder:text-gray-400 focus:border-purple-400 focus:ring-purple-400/20"
+                          />
+                        </div>
+                      </FormControl>
+                      <FormMessage className="text-red-300" />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="email"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-gray-200">Email</FormLabel>
+                      <FormControl>
+                        <div className="relative">
+                          <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                          <Input
+                            {...field}
+                            type="email"
+                            placeholder="Enter your email"
+                            className="pl-10 bg-white/10 border-white/20 text-white placeholder:text-gray-400 focus:border-purple-400 focus:ring-purple-400/20"
+                          />
+                        </div>
+                      </FormControl>
+                      <FormMessage className="text-red-300" />
+                    </FormItem>
+                  )}
+                />
+
                 <FormField
                   control={form.control}
                   name="password"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel className="text-gray-200">New Password</FormLabel>
+                      <FormLabel className="text-gray-200">Password</FormLabel>
                       <FormControl>
                         <div className="relative">
                           <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
                           <Input
                             {...field}
                             type={showPassword ? "text" : "password"}
-                            placeholder="Enter new password"
+                            placeholder="Create a password"
                             className="pl-10 pr-10 bg-white/10 border-white/20 text-white placeholder:text-gray-400 focus:border-purple-400 focus:ring-purple-400/20"
                           />
                           <button
@@ -186,14 +268,14 @@ export default function ResetPasswordForm() {
                   name="confirmPassword"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel className="text-gray-200">Confirm New Password</FormLabel>
+                      <FormLabel className="text-gray-200">Confirm Password</FormLabel>
                       <FormControl>
                         <div className="relative">
                           <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
                           <Input
                             {...field}
                             type={showConfirmPassword ? "text" : "password"}
-                            placeholder="Confirm new password"
+                            placeholder="Confirm your password"
                             className="pl-10 pr-10 bg-white/10 border-white/20 text-white placeholder:text-gray-400 focus:border-purple-400 focus:ring-purple-400/20"
                           />
                           <button
@@ -212,28 +294,31 @@ export default function ResetPasswordForm() {
 
                 <Button
                   type="submit"
-                  disabled={isLoading || !!error}
+                  disabled={isLoading}
                   className="w-full bg-gradient-to-r from-purple-500 to-blue-500 hover:from-purple-600 hover:to-blue-600 text-white font-medium py-2.5 rounded-lg transition-all duration-200 transform hover:scale-[1.02] disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
                 >
                   {isLoading ? (
                     <>
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Resetting password...
+                      Creating account...
                     </>
                   ) : (
-                    "Reset Password"
+                    "Create Account"
                   )}
                 </Button>
               </form>
             </Form>
 
             <div className="text-center">
-              <Link
-                href="/auth/login"
-                className="text-sm text-purple-300 hover:text-purple-200 transition-colors"
-              >
-                Back to Sign In
-              </Link>
+              <div className="text-sm text-gray-400">
+                Already have an account?{" "}
+                <Link
+                  href="/auth/login"
+                  className="text-purple-300 hover:text-purple-200 transition-colors font-medium"
+                >
+                  Sign in
+                </Link>
+              </div>
             </div>
           </CardContent>
         </Card>

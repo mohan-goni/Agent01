@@ -1,5 +1,5 @@
-import LoginForm from "@/components/auth/login-form"
+import ModernLoginForm from "@/components/auth/modern-login-form";
 
 export default function LoginPage() {
-  return <LoginForm />
+  return <ModernLoginForm />;
 }

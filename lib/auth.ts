@@ -1,54 +1,43 @@
-// import { betterAuth } from "better-auth"
-// import { prismaAdapter } from "better-auth/adapters/prisma"
-// import { PrismaClient } from "@prisma/client"
+import { supabase } from './supabaseClient';
+import type { User } from '@supabase/supabase-js';
 
-// const prisma = new PrismaClient()
+export async function auth() {
+  const { data: { session }, error } = await supabase.auth.getSession();
+  
+  if (error) {
+    console.error('Auth error:', error.message);
+    return null;
+  }
 
-// export const auth = betterAuth({
-//   database: prismaAdapter(prisma, {
-//     provider: "postgresql",
-//   }),
-//   socialProviders: {
-//     google: {
-//       clientId: process.env.GOOGLE_CLIENT_ID!,
-//       clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
-//       redirectURI: process.env.GOOGLE_REDIRECT_URI!,
-//     },
-//   },
-//   emailAndPassword: {
-//     enabled: true,
-//   },
-//   session: {
-//     expiresIn: 60 * 60 * 24 * 7, // 7 days
-//   },
-// })
+  return session;
+}
 
-// export type Session = typeof auth.$Infer.Session
+export async function getCurrentUser(): Promise<User | null> {
+  const { data: { user }, error } = await supabase.auth.getUser();
+  
+  if (error) {
+    console.error('Get user error:', error.message);
+    return null;
+  }
 
-// placeholder for auth if another auth system is intended
-// For example, if using NextAuth.js, configuration would go here.
-// If no JS-based auth is configured here.
-
-import { supabase } from './supabaseClient'; // Assuming supabaseClient.ts is created
+  return user;
+}
 
 export async function getUserSession() {
   const { data: { session }, error } = await supabase.auth.getSession();
+  
   if (error) {
     console.error('Error getting session:', error.message);
     return null;
   }
+  
   return session;
-}
-
-export async function getCurrentUser() {
-  const session = await getUserSession();
-  return session?.user ?? null;
 }
 
 export async function sendPasswordResetEmail({ email }: { email: string }) {
   try {
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      emailRedirectTo: `${window.location.origin}/auth/reset-password`,
+      redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'}/auth/reset-password`,
     });
 
     if (error) {
@@ -67,13 +56,13 @@ export async function resetPasswordClient({ token, password }: { token: string; 
   try {
     const { error } = await supabase.auth.updateUser({
       password: password,
-    }, {
-      redirectTo: `${window.location.origin}/auth/login`
     });
+    
     if (error) {
       console.error("Error resetting password:", error);
       return { error: error.message };
     }
+    
     return { data: { message: "Password reset successfully." } };
   } catch (error) {
     console.error("Unexpected error resetting password:", error);

@@ -1,5 +1,5 @@
-import SignupForm from "@/components/auth/signup-form";
+import ModernSignupForm from "@/components/auth/modern-signup-form";
 
 export default function SignupPage() {
-  return <SignupForm />;
+  return <ModernSignupForm />;
 }
