@@ -15,6 +15,16 @@ from agent_logic import (
 
 # Environment variable configuration
 class Settings(BaseSettings):
+    DATABASE_URL: str
+    NEXT_PUBLIC_SUPABASE_URL: str
+    NEXT_PUBLIC_SUPABASE_ANON_KEY: str
+    SUPABASE_SERVICE_ROLE_KEY: str
+    GOOGLE_CLIENT_ID: str
+    GOOGLE_CLIENT_SECRET: str
+    GOOGLE_REDIRECT_URI: str
+    AUTH_SECRET: str
+    AUTH_URL: str
+    PYTHON_AGENT_API_BASE_URL: str
     GOOGLE_API_KEY: str
     TAVILY_API_KEY: str
     SERPAPI_API_KEY: str
@@ -23,9 +33,11 @@ class Settings(BaseSettings):
     FINANCIAL_MODELING_PREP_API_KEY: str # Changed from fmp_api_key
     ALPHA_VANTAGE_API_KEY: str
     MEDIASTACK_API_KEY: str # Added
+    EMAIL_SERVICE_API_KEY: str
+    EMAIL_FROM: str
 
     class Config:
-        env_file = ".env"
+        env_file = "../.env.local"
         env_file_encoding = "utf-8"
 
 # Initialize settings and logger
@@ -175,3 +187,5 @@ if __name__ == "__main__":
     logger.info("Running FastAPI app locally with Uvicorn")
     init_agent_db()
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+

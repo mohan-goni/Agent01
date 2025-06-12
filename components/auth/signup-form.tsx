@@ -1,66 +1,93 @@
-"use client"
+"use client";
 
-import type React from "react"
-import { useState } from "react"
-import { signUp } from "@/lib/auth-client"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Separator } from "@/components/ui/separator"
-import Link from "next/link"
+import type React from "react";
+import { useState } from "react";
+import { supabase } from "@/lib/supabaseClient";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Separator } from "@/components/ui/separator";
+import Link from "next/link";
 
 export default function SignupForm() {
-  const [email, setEmail] = useState("")
-  const [password, setPassword] = useState("")
-  const [confirmPassword, setConfirmPassword] = useState("")
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleEmailSignup = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setError(null)
+    e.preventDefault();
+    setError(null);
     if (password !== confirmPassword) {
-      setError("Passwords do not match.")
-      return
+      setError("Passwords do not match.");
+      return;
     }
-    setLoading(true)
+    setLoading(true);
 
     try {
-      const { error: apiError, user } = await signUp("email", { email, password })
+      const { data, error: apiError } = await supabase.auth.signUp({
+        email,
+        password,
+      });
 
       if (apiError) {
-        setError(apiError)
-      } else if (user) {
+        setError(apiError.message);
+      } else if (data.user) {
         // Redirect to a page that tells the user to check their email for verification,
         // or directly to login / dashboard if email verification is not strictly enforced before first login.
         // For now, redirecting to login with a success message.
-        window.location.href = "/auth/login?message=Signup+successful.+Please+login."
+        window.location.href =
+          "/auth/login?message=Signup+successful.+Please+login.";
+      } else if (data.session === null && data.user === null) {
+        // This case happens when email confirmation is required
+        window.location.href =
+          "/auth/login?message=Please+check+your+email+to+confirm+your+signup.";
       }
     } catch (err) {
       // Catch any unexpected errors from signUp itself
-      console.error("Unexpected signup function error:", err)
-      setError("An unexpected error occurred. Please try again.")
+      console.error("Unexpected signup function error:", err);
+      setError("An unexpected error occurred. Please try again.");
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
 
-  const handleGoogleSignup = () => {
-    // better-auth typically uses the same Google sign-in endpoint for both sign-in and sign-up.
-    // If a user signs in with Google and doesn't have an account, better-auth creates one.
-    window.location.href = "/api/auth/sign-in/google"
-  }
+  const handleGoogleSignup = async () => {
+    const { error: apiError } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo: window.location.origin + "/auth/callback",
+      },
+    });
+
+    if (apiError) {
+      setError(apiError.message);
+    }
+  };
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50">
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
           <CardTitle className="text-2xl">Create an Account</CardTitle>
-          <CardDescription>Join Market Intelligence Platform today.</CardDescription>
+          <CardDescription>
+            Join Market Intelligence Platform today.
+          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <Button onClick={handleGoogleSignup} variant="outline" className="w-full">
+          <Button
+            onClick={handleGoogleSignup}
+            variant="outline"
+            className="w-full"
+          >
             {/* Replace with actual Google SVG or use lucide icon if preferred */}
             <svg className="w-4 h-4 mr-2" viewBox="0 0 24 24">
               <path
@@ -88,7 +115,9 @@ export default function SignupForm() {
               <Separator className="w-full" />
             </div>
             <div className="relative flex justify-center text-xs uppercase">
-              <span className="bg-background px-2 text-muted-foreground">Or sign up with email</span>
+              <span className="bg-background px-2 text-muted-foreground">
+                Or sign up with email
+              </span>
             </div>
           </div>
 
@@ -134,12 +163,15 @@ export default function SignupForm() {
           </form>
           <p className="text-center text-sm text-muted-foreground">
             Already have an account?{" "}
-            <Link href="/auth/login" className="font-medium text-blue-600 hover:underline">
+            <Link
+              href="/auth/login"
+              className="font-medium text-blue-600 hover:underline"
+            >
               Sign In
             </Link>
           </p>
         </CardContent>
       </Card>
     </div>
-  )
+  );
 }
